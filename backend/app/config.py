@@ -137,6 +137,7 @@ class Settings(BaseSettings):
     # readings stamped further in the future than this are rejected (clock-skew guard)
     mqtt_max_future_skew_s: float = Field(300.0, ge=0)
     mqtt_client_id: str = "aquaguard-backend"
+    mqtt_worker_concurrency: int = Field(16, ge=1, le=256)
 
     # ml
     model_dir: Path = REPO_ROOT / "ml" / "models"

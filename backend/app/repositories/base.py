@@ -16,6 +16,10 @@ class BaseRepository(Generic[T]):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @property
+    def dialect(self) -> str:
+        return self.session.get_bind().dialect.name
+
     async def get(self, id_: Any) -> T | None:
         return await self.session.get(self.model, id_)
 

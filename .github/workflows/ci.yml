@@ -24,6 +24,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - run: pip install -e libs/aquaguard_features
       - run: pip install -e "backend[dev]" pytest-cov ruff mypy
       - run: ruff check backend
       - run: ruff format --check backend
@@ -39,6 +40,62 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
 
+  # Real PostgreSQL 16 + real Mosquitto (auth + per-device ACL rendered by infra/mosquitto).
+  # Mosquitto is started with `docker run` after checkout because a `services:` container
+  # cannot mount repository files; its configuration is still driven purely by env vars.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aquaguard
+          POSTGRES_PASSWORD: ${{ github.run_id }}-ci-only-pg
+          POSTGRES_DB: aquaguard_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aquaguard -d aquaguard_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://aquaguard:${{ github.run_id }}-ci-only-pg@127.0.0.1:5432/aquaguard_test
+      TEST_MQTT_HOST: 127.0.0.1
+      TEST_MQTT_PORT: "1883"
+      TEST_MQTT_USERNAME: aquaguard-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Generate throw-away broker secrets
+        run: |
+          echo "TEST_MQTT_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          echo "TEST_MQTT_DEVICE_SECRET=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Start Mosquitto (config via env)
+        run: |
+          docker run -d --name mosquitto --network host \
+            -e MQTT_USERNAME="$TEST_MQTT_USERNAME" -e MQTT_PASSWORD="$TEST_MQTT_PASSWORD" \
+            -e MQTT_DEVICE_SECRET="$TEST_MQTT_DEVICE_SECRET" \
+            -e MQTT_DEVICES="green-valley/101,green-valley/102" \
+            -v "$PWD/infra/mosquitto:/mosquitto/config:ro" \
+            --entrypoint /bin/sh eclipse-mosquitto:2 /mosquitto/config/entrypoint.sh
+          for i in $(seq 1 30); do
+            docker run --rm --network host eclipse-mosquitto:2 mosquitto_pub -h 127.0.0.1 \
+              -u "$TEST_MQTT_USERNAME" -P "$TEST_MQTT_PASSWORD" -t aquaguard/ci -m up && exit 0
+            sleep 1
+          done
+          docker logs mosquitto; exit 1
+      - run: pip install -e libs/aquaguard_features
+      - run: pip install -e "backend[dev]"
+      - name: Integration tests (migrations, repositories, ingest races, MQTT, ACL)
+        working-directory: backend
+        run: pytest tests/integration -m integration -v
+        env:
+          ENVIRONMENT: test
+          SECRET_KEY: ci-only-test-key-not-a-secret-0123456789abcdef
+      - if: failure()
+        run: docker logs mosquitto
+
   ml:
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +105,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: |
+          pip install -e libs/aquaguard_features
           if [ -f ml/requirements.txt ]; then pip install -r ml/requirements.txt; else pip install -e ml; fi
           pip install pytest ruff
       - run: ruff check ml

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, func, literal, select, update
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models import SensorHealth
 from app.repositories.base import BaseRepository
+
+
+EXPECTED_INTERVAL_S = 60.0
 
 
 class SensorHealthRepository(BaseRepository[SensorHealth]):
@@ -19,7 +24,7 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
         """Insert-or-update. On PostgreSQL a single atomic ON CONFLICT statement, so concurrent
         first messages of a flat cannot fail on the primary key (and never touch the ORM
         identity map). Other dialects (SQLite tests) use get-then-write."""
-        if self.session.bind.dialect.name == "postgresql":
+        if self.dialect == "postgresql":
             stmt = pg_insert(SensorHealth).values(flat_id=flat_id, **values)
             await self.session.execute(
                 stmt.on_conflict_do_update(
@@ -28,7 +33,9 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
                 )
             )
             # a row cached in this session (if any) is now stale
-            cached = self.session.identity_map.get((SensorHealth, (flat_id,)), None)
+            cached = self.session.identity_map.get(
+                sa_inspect(SensorHealth).identity_key_from_primary_key((flat_id,))  # type: ignore[union-attr]
+            )
             if cached is not None:
                 self.session.expire(cached)
             return
@@ -43,3 +50,37 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
 
     async def all(self) -> list[SensorHealth]:
         return await self._all(select(SensorHealth))
+
+    async def refresh_statuses(
+        self, now: datetime, *, late_after: timedelta, offline_after: timedelta
+    ) -> list[tuple[uuid.UUID, str]]:
+        """Recompute online/late/offline for every sensor with set-based UPDATEs.
+
+        Returns (flat_id, new_status) for each row whose status changed. Also refreshes
+        ``missed_readings`` for sensors that are not online (one statement, no row loading).
+        """
+        online_cut, late_cut = now - late_after, now - offline_after
+        buckets = (
+            ("online", SensorHealth.last_seen >= online_cut),
+            ("late", (SensorHealth.last_seen < online_cut) & (SensorHealth.last_seen >= late_cut)),
+            ("offline", SensorHealth.last_seen.is_(None) | (SensorHealth.last_seen < late_cut)),
+        )
+        changed: list[tuple[uuid.UUID, str]] = []
+        for status, cond in buckets:
+            res = await self.session.execute(
+                update(SensorHealth)
+                .where(cond, SensorHealth.status != status)
+                .values(status=status)
+                .returning(SensorHealth.flat_id)
+            )
+            changed.extend((fid, status) for fid in res.scalars().all())
+        if self.dialect == "postgresql":
+            age_s = func.extract("epoch", literal(now) - SensorHealth.last_seen)
+        else:
+            age_s = (func.julianday(literal(now)) - func.julianday(SensorHealth.last_seen)) * 86400
+        await self.session.execute(
+            update(SensorHealth)
+            .where(SensorHealth.last_seen.is_not(None), SensorHealth.status != "online")
+            .values(missed_readings=func.cast(func.floor(age_s / EXPECTED_INTERVAL_S), Integer))
+        )
+        return changed

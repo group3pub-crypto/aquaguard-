@@ -1,5 +1,6 @@
 from app.repositories.alert import AlertRepository
 from app.repositories.anomaly import AnomalyRepository
+from app.repositories.auth import RefreshTokenRepository, WsTicketRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.baseline import BaselineRepository
 from app.repositories.flat import FlatRepository
@@ -18,8 +19,10 @@ __all__ = [
     "FlatRepository",
     "ForecastRepository",
     "ReadingRepository",
+    "RefreshTokenRepository",
     "SensorHealthRepository",
     "SocietyRepository",
     "UserRepository",
     "ValveRepository",
+    "WsTicketRepository",
 ]

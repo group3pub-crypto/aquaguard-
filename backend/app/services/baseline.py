@@ -15,10 +15,17 @@ from app.models import Baseline, Flat
 from app.repositories import AuditRepository, BaselineRepository, ReadingRepository
 
 READY_DAYS = 14
-STALE_AFTER = timedelta(days=7)
+STALE_AFTER = timedelta(days=30)
 TRAINING_WINDOW_DAYS = 28
+DEFAULT_MIN_SLOT_SAMPLES = 30
 
 _tz: tzinfo = UTC
+_min_slot_samples = DEFAULT_MIN_SLOT_SAMPLES
+
+
+def configure_min_slot_samples(n: int) -> None:
+    global _min_slot_samples
+    _min_slot_samples = n
 
 
 def configure_timezone(name: str) -> None:
@@ -84,8 +91,14 @@ def compute_slots(samples: list[tuple[datetime, float]]) -> tuple[list[dict], in
     return fit_slot_baseline(slot, flows, hour_id).to_slots(), len(days)
 
 
-def status_for(sample_days: int) -> str:
-    return "ready" if sample_days >= READY_DAYS else "learning"
+def status_for(sample_days: int, slots: list[dict] | None = None) -> str:
+    """'ready' needs >= READY_DAYS distinct days AND every one of the 168 hour-of-week slots
+    backed by >= MIN_SLOT_SAMPLES samples; anything less is still 'learning'."""
+    if sample_days < READY_DAYS or not slots or len(slots) != SLOTS:
+        return "learning"
+    if any(s.get("sample_count", 0) < _min_slot_samples for s in slots):
+        return "learning"
+    return "ready"
 
 
 async def train_baseline(
@@ -104,7 +117,7 @@ async def train_baseline(
         trained_to=rows[-1][0] if rows else now,
         sample_days=days,
     )
-    flat.baseline_status = status_for(days)
+    flat.baseline_status = status_for(days, slots)
     await AuditRepository(session).record(
         entity_type="baseline",
         entity_id=baseline.id,
@@ -126,7 +139,7 @@ def is_stale(baseline: Baseline | None, now: datetime) -> bool:
 
 
 async def refresh_status(session: AsyncSession, flat: Flat, now: datetime) -> str:
-    """Flip a ready baseline to 'stale' when it has not been retrained for a week."""
+    """Flip a ready baseline to 'stale' when it has not been retrained for 30 days."""
     baseline = await BaselineRepository(session).active(flat.id)
     if flat.baseline_status == "ready" and is_stale(baseline, now):
         flat.baseline_status = "stale"

@@ -30,12 +30,6 @@ class NullPublisher:
 
 
 @dataclass
-class DemoState:
-    active_faults: dict[UUID, str] = field(default_factory=dict)
-    speed: float = 1.0
-
-
-@dataclass
 class Runtime:
     settings: Settings
     db: Database
@@ -57,20 +51,15 @@ class Runtime:
             "detect_shed": 0,
         }
     )
-    demo: DemoState = field(default_factory=DemoState)
     last_detect: dict[UUID, float] = field(default_factory=dict)
     # (slug, unit) -> (flat_id, society_id, expires_monotonic): saves a join per MQTT message
     flat_cache: dict[tuple[str, str], tuple[UUID, UUID, float]] = field(default_factory=dict)
     last_flow_monotonic: float | None = None
+    started_at: float = field(default_factory=time.time)
+    is_leader: bool = False  # holds the maintenance advisory lock (always True without PG)
     detect_inflight: int = 0
 
     def dead_letter(self, topic: str, reason: str) -> None:
         self.dead_letters.append(
             {"at": datetime.now(UTC).isoformat(), "topic": topic[:200], "reason": reason[:200]}
-        )
-
-    def simulator_running(self, window_s: float = 30.0) -> bool:
-        return (
-            self.last_flow_monotonic is not None
-            and time.monotonic() - self.last_flow_monotonic < window_s
         )

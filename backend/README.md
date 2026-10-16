@@ -16,6 +16,39 @@ ruff check . && pytest -q           # tests use in-memory SQLite, no services ne
 
 The Docker image runs `alembic upgrade head` and then uvicorn (`docker-entrypoint.sh`).
 
+## Integration tests (real PostgreSQL + Mosquitto)
+
+`pytest` alone runs the SQLite/mock suite; `tests/integration/` (marker `integration`) is
+**skipped** unless the environment points at real services. Use a dedicated, empty database: the
+tests run Alembic against it and `TRUNCATE` every table before each test.
+
+| Variable | Needed for |
+|---|---|
+| `TEST_DATABASE_URL` | all integration tests, e.g. `postgresql+asyncpg://user:pw@127.0.0.1:5432/aquaguard_test` |
+| `TEST_MQTT_HOST`, `TEST_MQTT_PORT`, `TEST_MQTT_USERNAME`, `TEST_MQTT_PASSWORD` | tests marked `mqtt` (broker round trip, reconnect/resubscribe, redelivery, anonymous refusal); the user needs `readwrite aquaguard/#` |
+| `TEST_MQTT_DEVICE_SECRET` | optional: per-device ACL test (broker started with `MQTT_DEVICES` containing `green-valley/101` and the same `MQTT_DEVICE_SECRET`) |
+
+```bash
+# broker with auth + per-device ACL, rendered from env (see infra/mosquitto/README.md)
+MQTT_RUNTIME_DIR=/tmp/aq-mq MQTT_DATA_DIR=/tmp/aq-mq/data MQTT_LISTEN_ADDR=127.0.0.1 \
+MQTT_LISTEN_PORT=1883 MQTT_USERNAME=aquaguard-backend MQTT_PASSWORD=$(openssl rand -hex 12) \
+MQTT_DEVICE_SECRET=$(openssl rand -hex 24) MQTT_DEVICES=green-valley/101 \
+  sh ../infra/mosquitto/entrypoint.sh &
+export TEST_DATABASE_URL=... TEST_MQTT_HOST=127.0.0.1 TEST_MQTT_PORT=1883 \
+       TEST_MQTT_USERNAME=aquaguard-backend TEST_MQTT_PASSWORD=...
+pytest tests/integration -m integration -v
+```
+
+Covered: Alembic up/down/up and `alembic check` (no model drift), CHECK constraints / partial
+index predicates / ON DELETE actions vs the models, `updated_at` triggers, cascades, JSONB,
+unique constraints, pagination, concurrent duplicate and concurrent distinct ingest, the alert
+lifecycle, MQTT reconnect + resubscribe, at-least-once redelivery, device ACL. CI runs them in the
+`integration` job (`postgres:16` service + Mosquitto started with the same entrypoint).
+
+Ingest tuning (env): `MQTT_WORKER_CONCURRENCY` (16), `DETECT_MAX_CONCURRENCY` (2, ML runs are
+shed when saturated), `DETECT_DEBOUNCE_SECONDS` (30), `MQTT_MAX_FUTURE_SKEW_S` (300; raise for the
+accelerated demo simulator). Measured throughput: `docs/performance.md`.
+
 ## Configuration (env)
 
 | Variable | Notes |

@@ -26,7 +26,7 @@ class ReadingRepository(BaseRepository[FlowReading]):
         PostgreSQL: one ``INSERT .. ON CONFLICT DO NOTHING RETURNING id`` (atomic, no failed
         statement, no savepoint, one round trip). Other dialects: check + savepoint.
         """
-        if self.session.bind.dialect.name == "postgresql":
+        if self.dialect == "postgresql":
             cols = (
                 "flat_id", "timestamp", "flow_rate", "volume", "pressure", "temperature",
                 "battery_pct", "rssi", "message_id", "received_at",
