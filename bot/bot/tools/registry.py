@@ -12,7 +12,7 @@ from typing import Any
 
 from bot.auth import Role, role_allows
 
-Handler = Callable[[Any, dict], Awaitable[str]]  # (api_client, args) -> text
+Handler = Callable[[Any, dict, str], Awaitable[str]]  # (api_client, args, actor) -> text
 
 _TYPES: dict[str, type | tuple[type, ...]] = {
     "string": str,
@@ -100,11 +100,11 @@ class ToolRegistry:
             clean[key] = val
         return clean
 
-    async def call(self, name: str, args: dict, role: Role | None, api: Any) -> str:
+    async def call(self, name: str, args: dict, role: Role | None, api: Any, actor: str = "bot") -> str:
         tool = self.get(name)
         if not role_allows(role, tool.required_role):
             raise PermissionDenied(f"{name} requires role {tool.required_role.name.lower()}")
-        return await tool.handler(api, self.validate(tool, args))
+        return await tool.handler(api, self.validate(tool, args), actor)
 
 
 def build_default_registry() -> ToolRegistry:

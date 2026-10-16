@@ -2,8 +2,8 @@ from bot.auth import Role
 from bot.tools.registry import Tool, ToolRegistry
 
 
-async def set_valve(api, args: dict) -> str:
-    await api.set_valve(args["unit"], args["action"])
+async def set_valve(api, args: dict, actor: str) -> str:
+    await api.set_valve(args["unit"], args["action"], actor)
     return f"Valve for {args['unit']}: {args['action']} command sent."
 
 

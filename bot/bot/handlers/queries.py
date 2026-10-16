@@ -16,13 +16,22 @@ _RULES: list[tuple[re.Pattern[str], str, dict]] = [
 ]
 
 
+_UNIT = re.compile(r"\b([A-Za-z]{0,3}-?\d{2,4})\b")
+
+
 def match_intent(text: str) -> tuple[str, dict] | None:
     """Return (tool_name, args) or None. Order matters: first rule wins."""
     text = text[:300]
     # 'top losses' must beat the generic 'leak' rule
     for pat, tool, args in sorted(_RULES, key=lambda r: r[1] != "top_losses"):
         if pat.search(text):
-            return tool, dict(args)
+            args = dict(args)
+            if tool == "get_usage_summary":
+                m = _UNIT.search(text)
+                if not m:
+                    return None
+                args["unit"] = m.group(1).upper()
+            return tool, args
     return None
 
 

@@ -35,11 +35,13 @@ async def dispatch(deps: Any, context: Any, uid: int, role: Any, parts: list[str
             if parts[1] == "no":
                 return "Cancelled."
             if parts[1] == "yes" and len(parts) == 4:
-                return await deps.registry.call("set_valve", {"unit": parts[2], "action": parts[3]}, role, deps.api)
+                return await deps.registry.call(
+                    "set_valve", {"unit": parts[2], "action": parts[3]}, role, deps.api, f"telegram:{uid}"
+                )
         elif kind == "alert" and len(parts) == 3:
             tool = {"ack": "acknowledge_alert", "snooze": "snooze_alert"}.get(parts[1])
             if tool:
-                return await deps.registry.call(tool, {"alert_id": parts[2]}, role, deps.api)
+                return await deps.registry.call(tool, {"alert_id": parts[2]}, role, deps.api, f"telegram:{uid}")
     except (PermissionError, PermissionDenied):
         return "You are not allowed to do that."
     except KeyError:

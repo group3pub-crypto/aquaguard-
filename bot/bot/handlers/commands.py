@@ -24,7 +24,7 @@ async def run_tool(update: Any, context: Any, name: str, args: dict | None = Non
         await reply(update, deps, "Not linked. Use /link <username> first.")
         return
     try:
-        text = await deps.registry.call(name, args or {}, role, deps.api)
+        text = await deps.registry.call(name, args or {}, role, deps.api, f"telegram:{update.effective_user.id}")
     except PermissionDenied:
         text = "You are not allowed to do that."
     except ToolError as exc:

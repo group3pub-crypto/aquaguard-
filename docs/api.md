@@ -9,14 +9,16 @@ Roles: resident < maintenance < admin. Reads are open to any authenticated user.
 | POST `/auth/login` | Obtain JWT | none |
 | GET `/health` | Liveness | none |
 | GET `/alerts`, `/alerts/{id}` (`?state=`) | List / read alerts | any authenticated |
-| GET `/units`, `/usage/*`, `/losses/*`, `/reports/*`, `/forecast/*` | Read data | any authenticated |
-| POST `/alerts/{id}/ack` | Acknowledge | admin or maintenance |
+| GET `/forecast/*` | Read data | any authenticated |
+| POST `/alerts/{id}/acknowledge` | Acknowledge | admin or maintenance |
 | POST `/alerts/{id}/snooze` | Snooze | admin or maintenance |
 | POST `/alerts/{id}/resolve` | Resolve | admin or maintenance |
-| POST `/units/{unit}/valve` | Open/close valve | admin |
+| POST `/tools/valve-control` | Open/close valve | admin |
+| POST `/tools/{active-alerts,flat-usage,top-losses,weekly-report}` | Bot/orchestrator tool endpoints | any authenticated |
+| GET `/societies`, `/flats?society_id=` | Lookups | any authenticated |
 | POST `/alerts/{id}/override` | Manual state override | admin |
 | POST `/demo/*` | Demo controls (only when `DEMO_MODE=true`) | admin |
-| PUT `/users/{id}/role` | Change role | admin |
+| PUT `/auth/users/{id}/role` | Change role | admin |
 | POST `/ml/retrain` | Retrain models | admin |
 | POST `/forecast/generate` | Generate forecast | admin |
 

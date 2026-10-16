@@ -18,6 +18,7 @@ resident (read) < maintenance (+ack/snooze/resolve) < admin (+valve, override, d
 - JWT bearer auth with expiry (`ACCESS_TOKEN_EXPIRE_MINUTES`); no revocation yet.
 - CORS limited to `ALLOWED_ORIGINS`.
 - Rate limiting and WebSocket authentication are implemented in the backend (see its code/tests for specifics).
+- Bot service account: create it by registering a user and promoting it with `PUT /api/v1/auth/users/{id}/role` (admin or maintenance); `make seed` does not create it. Set `BOT_API_USERNAME`/`BOT_API_PASSWORD`.
 - Bot: admin ids from env, link approval by admin, role re-check on every callback, valve changes require a confirmation press, tokens never logged, MarkdownV2 escaping.
 
 ## CI

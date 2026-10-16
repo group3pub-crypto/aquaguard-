@@ -15,7 +15,7 @@ TELEGRAM_BOT_TOKEN=... BOT_API_PASSWORD=... python -m bot.main
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | required, from @BotFather; never logged |
 | `TELEGRAM_ADMIN_IDS` | comma-separated Telegram user ids with the admin role |
-| `BOT_API_BASE_URL` / `BOT_API_USERNAME` / `BOT_API_PASSWORD` | backend service account (needs admin or maintenance rights for ack/snooze/valve) |
+| `BOT_API_BASE_URL` / `BOT_API_USERNAME` / `BOT_API_PASSWORD` | backend service account (admin or maintenance account, see below) |
 | `BOT_STATE_FILE` | JSON file persisting approved links (optional) |
 | `BOT_POLL_INTERVAL` | alert poll period in seconds (default 30) |
 
@@ -47,9 +47,16 @@ validates arguments against the schema and enforces the role. Tools: `get_usage_
 `generate_report`. A state-changing tool such as `set_valve` should always be gated by a
 human confirmation step in the orchestrator.
 
-## Assumed backend endpoints
+## Backend endpoints used
 
-All in `bot/api_client.py`: `POST /api/v1/auth/login`, `GET /api/v1/alerts?state=`,
-`GET /api/v1/usage/summary`, `GET /api/v1/losses/top`, `GET /api/v1/reports/summary`,
-`POST /api/v1/alerts/{id}/ack|snooze`, `POST /api/v1/units/{unit}/valve`. Adjust that one
-file if the backend paths differ.
+All in `bot/api_client.py` (Bearer JWT, `/api/v1`): `POST /auth/login`, `GET /alerts?state=&limit=`,
+`POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/snooze` (15/30/60/120 min), `GET /societies`,
+`GET /flats?society_id=` (unit number -> flat id), and `POST /tools/{active-alerts, flat-usage,
+top-losses, valve-control, weekly-report}`. The bot uses the first society returned by `/societies`.
+
+## Creating the bot service account
+
+`make seed` creates only the demo admin/resident users, not the bot account. Create it once:
+register a user (e.g. `bot_service`) via the API/dashboard, then promote it as an admin with
+`PUT /api/v1/auth/users/{id}/role` to `admin` (or `maintenance` if valve control is not needed
+through the bot). Put its credentials in `BOT_API_USERNAME` / `BOT_API_PASSWORD`.

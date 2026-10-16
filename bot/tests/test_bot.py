@@ -23,13 +23,13 @@ class FakeApi:
         self.valve_calls = []
         self.acked = []
 
-    async def set_valve(self, unit, action):
+    async def set_valve(self, unit, action, actor="bot"):
         self.valve_calls.append((unit, action))
 
-    async def ack_alert(self, aid):
+    async def ack_alert(self, aid, actor="bot"):
         self.acked.append(aid)
 
-    async def alerts(self, state=None):
+    async def alerts(self, state=None, limit=50):
         return [{"id": "a1", "state": state, "unit": "A-101", "message": "leak"}]
 
     async def top_losses(self, limit=5):
@@ -110,7 +110,7 @@ def test_duplicate_registration_rejected(deps):
         ("which flats are leaking", "list_active_alerts"),
         ("show me the top losses", "top_losses"),
         ("top leak losses please", "top_losses"),
-        ("water usage today", "get_usage_summary"),
+        ("water usage of A-101 today", "get_usage_summary"),
         ("send report", "generate_report"),
     ],
 )
@@ -221,3 +221,30 @@ async def test_api_client_raises_on_403():
     api = ApiClient("http://x", "u", "p", transport=httpx.MockTransport(handler))
     with pytest.raises(ApiError):
         await api.get("/api/v1/thing")
+
+
+def test_usage_intent_extracts_unit():
+    assert match_intent("water usage of a-101") == ("get_usage_summary", {"unit": "A-101"})
+
+
+async def test_api_client_real_endpoints():
+    seen = []
+
+    def handler(req):
+        seen.append((req.method, req.url.path, req.content.decode()))
+        p = req.url.path
+        if p.endswith("login"):
+            return httpx.Response(200, json={"access_token": "t"})
+        if p == "/api/v1/societies":
+            return httpx.Response(200, json=[{"id": 7}])
+        if p == "/api/v1/flats":
+            return httpx.Response(200, json=[{"id": 42, "unit_number": "A-101"}])
+        return httpx.Response(200, json={"ok": 1})
+
+    api = ApiClient("http://x", "u", "p", transport=httpx.MockTransport(handler))
+    await api.set_valve("a-101", "close", "telegram:1")
+    await api.snooze_alert("5", 30, "telegram:1")
+    paths = [(m, p) for m, p, _ in seen]
+    assert ("POST", "/api/v1/tools/valve-control") in paths
+    assert json.loads(seen[-2][2]) == {"flat_id": 42, "action": "close", "issued_by": "telegram:1"}
+    assert json.loads(seen[-1][2]) == {"duration_minutes": 30, "snoozed_by": "telegram:1"}

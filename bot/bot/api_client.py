@@ -78,24 +78,59 @@ class ApiClient:
         return await self._request("POST", path, json=json)
 
     # --- endpoint wrappers: the only place that knows backend paths ---------
-    async def alerts(self, state: str | None = None) -> list[dict]:
-        data = await self.get("/api/v1/alerts", state=state)
+    async def alerts(self, state: str | None = None, limit: int = 50) -> list[dict]:
+        data = await self.get("/api/v1/alerts", state=state, limit=limit)
         return data["items"] if isinstance(data, dict) and "items" in data else data
 
-    async def usage_summary(self, unit: str | None = None, days: int = 1) -> dict:
-        return await self.get("/api/v1/usage/summary", unit=unit, days=days)
+    async def societies(self) -> list[dict]:
+        return await self.get("/api/v1/societies")
 
-    async def top_losses(self, limit: int = 5) -> list[dict]:
-        return await self.get("/api/v1/losses/top", limit=limit)
+    async def flats(self, society_id: Any) -> list[dict]:
+        return await self.get("/api/v1/flats", society_id=society_id)
+
+    async def default_society_id(self) -> Any:
+        socs = await self.societies()
+        if not socs:
+            raise ApiError(404, "no society configured")
+        return socs[0]["id"]
+
+    async def resolve_flat(self, unit: str, society_id: Any = None) -> Any:
+        """Map a unit number such as 'A-101' to the backend flat id."""
+        sid = society_id if society_id is not None else await self.default_society_id()
+        for f in await self.flats(sid):
+            if str(f.get("unit_number")).lower() == unit.lower():
+                return f["id"]
+        raise ApiError(404, f"unknown unit {unit}")
+
+    async def active_alerts(self, unit: str | None = None) -> list[dict]:
+        body: dict = {}
+        if unit:
+            body["flat_id"] = await self.resolve_flat(unit)
+        else:
+            body["society_id"] = await self.default_society_id()
+        data = await self.post("/api/v1/tools/active-alerts", body)
+        return data["alerts"] if isinstance(data, dict) and "alerts" in data else data
+
+    async def usage_summary(self, unit: str, period: str = "today") -> dict:
+        flat_id = await self.resolve_flat(unit)
+        return await self.post("/api/v1/tools/flat-usage", {"flat_id": flat_id, "period": period})
+
+    async def top_losses(self, limit: int = 5) -> dict | list:
+        sid = await self.default_society_id()
+        return await self.post("/api/v1/tools/top-losses", {"society_id": sid, "top_n": limit})
 
     async def report(self) -> dict:
-        return await self.get("/api/v1/reports/summary")
+        sid = await self.default_society_id()
+        return await self.post("/api/v1/tools/weekly-report", {"society_id": sid})
 
-    async def ack_alert(self, alert_id: str) -> dict:
-        return await self.post(f"/api/v1/alerts/{alert_id}/ack")
+    async def ack_alert(self, alert_id: str, actor: str = "bot") -> dict:
+        return await self.post(f"/api/v1/alerts/{alert_id}/acknowledge", {"acknowledged_by": actor})
 
-    async def snooze_alert(self, alert_id: str, minutes: int = 60) -> dict:
-        return await self.post(f"/api/v1/alerts/{alert_id}/snooze", {"minutes": minutes})
+    async def snooze_alert(self, alert_id: str, minutes: int = 60, actor: str = "bot") -> dict:
+        return await self.post(f"/api/v1/alerts/{alert_id}/snooze", {"duration_minutes": minutes, "snoozed_by": actor})
 
-    async def set_valve(self, unit: str, action: str) -> dict:
-        return await self.post(f"/api/v1/units/{unit}/valve", {"action": action})
+    async def set_valve(self, unit: str, action: str, actor: str = "bot") -> dict:
+        flat_id = await self.resolve_flat(unit)
+        return await self.post(
+            "/api/v1/tools/valve-control", {"flat_id": flat_id, "action": action, "issued_by": actor}
+        )

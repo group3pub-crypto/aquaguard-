@@ -31,15 +31,20 @@ def percentile(values: list[float], pct: float) -> float:
 
 async def meter(client, society: str, idx: int, interval: float, end: float,
                 latencies: list[float], errors: list[int]) -> int:
-    topic = f"aquaguard/{society}/load-{idx:04d}/telemetry"
+    topic = f"aquaguard/{society}/L-{idx:04d}/flow"
     sent = 0
     await asyncio.sleep(random.random() * interval)  # de-synchronise meters
     while time.monotonic() < end:
         payload = json.dumps({
-            "device_id": f"load-{idx:04d}",
-            "ts": time.time(),
-            "flow_lpm": round(random.uniform(0, 12), 2),
-            "pressure_kpa": round(random.uniform(180, 320), 1),
+            "v": 1,
+            "id": f"{random.getrandbits(32):08x}",
+            "ts": int(time.time()),
+            "flow": round(random.uniform(0, 12), 2),
+            "vol": round(random.uniform(0, 500), 1),
+            "psi": None,
+            "tmp": None,
+            "bat": None,
+            "rssi": None,
         })
         t0 = time.perf_counter()
         try:
@@ -61,7 +66,7 @@ async def main() -> None:
     ap.add_argument("--meters", type=int, default=500)
     ap.add_argument("--duration", type=float, default=30.0, help="seconds")
     ap.add_argument("--interval", type=float, default=1.0, help="seconds between msgs per meter")
-    ap.add_argument("--society", default="loadtest")
+    ap.add_argument("--society", default="loadtest", help="society slug")
     args = ap.parse_args()
 
     user, pwd = os.getenv("MQTT_USERNAME"), os.getenv("MQTT_PASSWORD")

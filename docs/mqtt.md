@@ -4,16 +4,17 @@ Broker: Mosquitto 2, `allow_anonymous false`, username/password from `MQTT_USERN
 
 | Topic | Direction | QoS | Retain | Payload |
 |---|---|---|---|---|
-| `aquaguard/<society>/<unit>/telemetry` | device -> backend | 1 | no | JSON telemetry |
-| `aquaguard/<society>/<unit>/status` | device -> backend | 1 | yes | `{"online":bool,"fw":str}` (last-will sets offline) |
-| `aquaguard/<society>/<unit>/command` | backend -> device | 1 | no | `{"cmd":"valve","action":"open"\|"close","id":str}` |
+| `aquaguard/{society_slug}/{flat_unit}/flow` | device -> backend | 1 | no | flow reading |
+| `aquaguard/{society_slug}/{flat_unit}/heartbeat` | device -> backend | 1 | no | `{"v":1,"ts","uptime","bat","fw"}` |
+| `aquaguard/{society_slug}/{flat_unit}/valve/cmd` | backend -> device | 1 | no | `{"v":1,"id","cmd":"open\|close","src","ts"}` |
+| `aquaguard/{society_slug}/{flat_unit}/valve/state` | device -> backend | 1 | no | `{"v":1,"cmd_id","state":"open\|closed","ts"}` |
+| `aquaguard/control/fault` | operator -> simulator | 1 | no | simulator fault injection |
+| `aquaguard/control/speed` | operator -> simulator | 1 | no | simulator speed control |
 
-Telemetry payload:
+Flow payload (`psi`, `tmp`, `bat`, `rssi` may be `null`):
 
 ```json
-{"device_id":"A-101","ts":1760000000.0,"flow_lpm":0.4,"pressure_kpa":240.0,"total_l":1234.5}
+{"v":1,"id":"a1b2c3d4","ts":1760000000,"flow":0.4,"vol":1234.5,"psi":null,"tmp":null,"bat":87,"rssi":-61}
 ```
 
-Telemetry is not retained: stale readings must not be replayed to new subscribers. QoS 1 gives at-least-once delivery, so consumers must tolerate duplicates.
-
-Topic names and fields above are the documented contract of this repo's infra; if the edge/backend implementations differ, the code is authoritative and this file should be updated. `infra/loadtest/load_test.py` uses the telemetry topic.
+`flow` is L/min, `vol` litres, `bat` 0-100, `ts` epoch seconds, `id` an 8-hex message id (useful for de-duplication). Readings are not retained so stale values are never replayed. QoS 1 is at-least-once; consumers must tolerate duplicates. `infra/loadtest/load_test.py` publishes `flow` messages on these topics.
