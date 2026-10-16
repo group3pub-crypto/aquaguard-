@@ -6,7 +6,7 @@ services:
 
   backend:
     read_only: false
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app_factory --factory --host 0.0.0.0 --port 8000 --reload"]
     environment:
       ENVIRONMENT: development
       BACKEND_LOG_LEVEL: debug

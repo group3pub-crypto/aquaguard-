@@ -1,0 +1,22 @@
+# AquaGuard broker config TEMPLATE. entrypoint.sh renders it (replacing the __TOKENS__)
+# into $MQTT_RUNTIME_DIR/mosquitto.conf together with the generated password and ACL
+# files. No credentials live in the repo. See infra/mosquitto/README.md.
+listener __LISTEN_PORT__ __LISTEN_ADDR__
+allow_anonymous false
+password_file __RUNTIME_DIR__/passwd
+acl_file __RUNTIME_DIR__/acl
+
+persistence true
+persistence_location __DATA_DIR__/
+autosave_interval 300
+
+max_connections 2000
+max_packet_size 65536
+max_inflight_messages 100
+max_queued_messages 5000
+
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+connection_messages true

@@ -1,0 +1,7 @@
+
+# device __DEVICE_USER__
+user __DEVICE_USER__
+topic write aquaguard/__SOCIETY__/__UNIT__/flow
+topic write aquaguard/__SOCIETY__/__UNIT__/heartbeat
+topic write aquaguard/__SOCIETY__/__UNIT__/valve/state
+topic read aquaguard/__SOCIETY__/__UNIT__/valve/cmd

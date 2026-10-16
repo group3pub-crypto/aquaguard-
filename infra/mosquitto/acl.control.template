@@ -1,0 +1,4 @@
+
+# --- simulator control client: may only listen for fault/speed control messages
+user __CONTROL_USER__
+topic read aquaguard/control/#

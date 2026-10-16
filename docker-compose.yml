@@ -32,8 +32,12 @@ services:
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}
+      MQTT_DEVICES: ${MQTT_DEVICES:-}
+      MQTT_DEVICE_SECRET: ${MQTT_DEVICE_SECRET:-}
+      MQTT_CONTROL_USERNAME: ${MQTT_CONTROL_USERNAME:-}
+      MQTT_CONTROL_PASSWORD: ${MQTT_CONTROL_PASSWORD:-}
     volumes:
-      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto:/mosquitto/config:ro
       - ./infra/mosquitto/entrypoint.sh:/entrypoint.sh:ro
       - mosquitto_data:/mosquitto/data
     tmpfs: ["/tmp"]
