@@ -1,53 +1,52 @@
-"""Inline-button callbacks. Every action re-checks the clicker's role."""
+"""Inline-button callbacks. Every action re-checks the clicker's role; callback data is untrusted."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from bot.deps import get_deps, send
-from bot.tools.registry import PermissionDenied, ToolError
+from bot.deps import Deps, explain, get_deps
+
+_ALERT_TOOLS = {"ack": "acknowledge_alert", "snooze": "snooze_alert", "resolve": "resolve_alert"}
 
 
 async def on_callback(update: Any, context: Any) -> None:
     q = update.callback_query
     deps = get_deps(context)
-    uid = q.from_user.id
-    role = deps.store.role_of(uid)
-    parts = (q.data or "").split(":")
     await q.answer()
-    text = await dispatch(deps, context, uid, role, parts)
+    msg = q.message
+    text = await dispatch(
+        deps,
+        q.from_user.id,
+        (q.data or "").split(":"),
+        chat_id=getattr(msg, "chat_id", None),
+        message_id=getattr(msg, "message_id", None),
+    )
     await q.edit_message_text(text)  # plain text: no parse mode, nothing to escape
 
 
-async def dispatch(deps: Any, context: Any, uid: int, role: Any, parts: list[str]) -> str:
+async def dispatch(
+    deps: Deps, uid: int, parts: list[str], chat_id: int | None = None, message_id: int | None = None
+) -> str:
+    principal = deps.store.principal_of(uid)
     kind = parts[0]
     try:
-        if kind == "link" and len(parts) == 3 and parts[2].isdigit():
-            target = int(parts[2])
-            if parts[1] == "approve":
-                req = deps.store.approve(uid, target)
-                await send(context.bot, deps, req["chat_id"], "Your account link was approved.")
-                return f"Approved {req['username']} ({target})."
-            if parts[1] == "reject":
-                deps.store.reject(uid, target)
-                return f"Rejected {target}."
-        elif kind == "valve":
+        if kind == "valve" and len(parts) == 3:
+            payload = deps.confirm.consume(parts[2], uid, chat_id if chat_id is not None else 0, message_id)
+            if payload is None:
+                return "This confirmation is no longer valid."
             if parts[1] == "no":
                 return "Cancelled."
-            if parts[1] == "yes" and len(parts) == 4:
-                return await deps.registry.call(
-                    "set_valve", {"unit": parts[2], "action": parts[3]}, role, deps.api, f"telegram:{uid}"
-                )
-        elif kind == "alert" and len(parts) == 3:
-            tool = {"ack": "acknowledge_alert", "snooze": "snooze_alert"}.get(parts[1])
-            if tool:
-                return await deps.registry.call(tool, {"alert_id": parts[2]}, role, deps.api, f"telegram:{uid}")
-    except (PermissionError, PermissionDenied):
-        return "You are not allowed to do that."
-    except KeyError:
-        return "Request no longer pending."
-    except ToolError as exc:
-        return f"Invalid request: {exc}"
-    except Exception:  # noqa: BLE001
-        return "Backend is unavailable, try again shortly."
+            if parts[1] == "yes":
+                text = await deps.registry.call("set_valve", payload, principal, deps.api)
+                deps.audit.record("valve", principal.actor if principal else f"telegram:{uid}", **payload)
+                return text
+        elif kind == "alert" and len(parts) == 3 and parts[1] in _ALERT_TOOLS:
+            args = {"alert_id": parts[2]}
+            if parts[1] == "snooze":
+                args["minutes"] = 60
+            text = await deps.registry.call(_ALERT_TOOLS[parts[1]], args, principal, deps.api)
+            deps.audit.record(f"alert_{parts[1]}", principal.actor if principal else f"telegram:{uid}", alert_id=parts[2])
+            return text
+    except Exception as exc:  # noqa: BLE001
+        return explain(exc)
     return "Unknown action."

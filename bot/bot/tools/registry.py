@@ -6,13 +6,14 @@ orchestrator (IBM watsonx Orchestrate / BOB) can call the same tools.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from bot.auth import Role, role_allows
+from bot.auth import Principal, Role, role_allows
 
-Handler = Callable[[Any, dict, str], Awaitable[str]]  # (api_client, args, actor) -> text
+Handler = Callable[[Any, dict, Principal], Awaitable[str]]  # (api_client, args, principal) -> text
 
 _TYPES: dict[str, type | tuple[type, ...]] = {
     "string": str,
@@ -95,16 +96,20 @@ class ToolRegistry:
                 raise ToolError(f"argument {key} must be >= {spec['minimum']}")
             if "maximum" in spec and val > spec["maximum"]:
                 raise ToolError(f"argument {key} must be <= {spec['maximum']}")
-            if spec["type"] == "string" and len(val) > spec.get("maxLength", 64):
-                raise ToolError(f"argument {key} too long")
+            if spec["type"] == "string":
+                if len(val) > spec.get("maxLength", 64):
+                    raise ToolError(f"argument {key} too long")
+                if "pattern" in spec and not re.match(spec["pattern"], val):
+                    raise ToolError(f"argument {key} has an invalid format")
             clean[key] = val
         return clean
 
-    async def call(self, name: str, args: dict, role: Role | None, api: Any, actor: str = "bot") -> str:
+    async def call(self, name: str, args: dict, principal: Principal | None, api: Any) -> str:
         tool = self.get(name)
-        if not role_allows(role, tool.required_role):
+        role = principal.role if principal else None
+        if principal is None or not role_allows(role, tool.required_role):
             raise PermissionDenied(f"{name} requires role {tool.required_role.name.lower()}")
-        return await tool.handler(api, self.validate(tool, args), actor)
+        return await tool.handler(api, self.validate(tool, args), principal)
 
 
 def build_default_registry() -> ToolRegistry:

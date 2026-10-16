@@ -1,3 +1,4 @@
+import { getConfig } from './config';
 import { clearToken, getToken, setToken } from './session';
 import type {
   AcknowledgeBody,
@@ -6,11 +7,10 @@ import type {
   Anomaly,
   ApiErrorBody,
   Baseline,
-  DemoStatus,
   Flat,
+  FlatDetail,
   Forecast,
   Id,
-  InjectFaultBody,
   LoginRequest,
   LoginResponse,
   OverrideBody,
@@ -22,16 +22,12 @@ import type {
   SnoozeBody,
   User,
   ValveCommand,
+  ValveCommandRecord,
   ValveInfo,
 } from './types';
 
-const DEFAULT_API = 'http://localhost:8000';
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_API).replace(/\/+$/, '');
-export const WS_URL = (process.env.NEXT_PUBLIC_WS_URL || API_URL.replace(/^http/, 'ws')).replace(
-  /\/+$/,
-  '',
-);
-export const API_BASE = `${API_URL}/api/v1`;
+/** Resolved lazily so the runtime config injected by the root layout is honoured. */
+export const apiBase = (): string => `${getConfig().apiUrl}/api/v1`;
 export const DEFAULT_TIMEOUT_MS = 10_000;
 
 export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'aborted';
@@ -73,7 +69,7 @@ function buildUrl(path: string, query?: Query): string {
     }
   }
   const s = qs.toString();
-  return `${API_BASE}${path}${s ? `?${s}` : ''}`;
+  return `${apiBase()}${path}${s ? `?${s}` : ''}`;
 }
 
 export function messageFromBody(body: unknown, fallback: string): string {
@@ -164,15 +160,15 @@ export const api = {
     return res;
   },
   register: (body: RegisterRequest) =>
-    request<unknown>('/auth/register', { method: 'POST', body, auth: false }),
+    request<User>('/auth/register', { method: 'POST', body, auth: false }),
   me: (o: Sig = {}) => request<User>('/auth/me', o),
 
   societies: (o: Sig = {}) => request<Society[]>('/societies', o),
   societyStats: (id: Id, o: Sig = {}) => request<SocietyStats>(`/societies/${enc(id)}/stats`, o),
 
   flats: (societyId?: Id, o: Sig = {}) =>
-    request<Flat[]>('/flats', { ...o, query: { society_id: societyId } }),
-  flat: (id: Id, o: Sig = {}) => request<Flat>(`/flats/${enc(id)}`, o),
+    request<Flat[]>('/flats', { ...o, query: { society_id: societyId, limit: 500 } }),
+  flat: (id: Id, o: Sig = {}) => request<FlatDetail>(`/flats/${enc(id)}`, o),
   readings: (id: Id, q: { from?: string; to?: string; limit?: number } = {}, o: Sig = {}) =>
     request<Reading[]>(`/flats/${enc(id)}/readings`, { ...o, query: q }),
   baseline: (id: Id, o: Sig = {}) => request<Baseline>(`/flats/${enc(id)}/baseline`, o),
@@ -183,24 +179,17 @@ export const api = {
 
   alerts: (q: AlertFilter = {}, o: Sig = {}) => request<Alert[]>('/alerts', { ...o, query: { ...q } }),
   acknowledge: (id: Id, body: AcknowledgeBody) =>
-    request<unknown>(`/alerts/${enc(id)}/acknowledge`, { method: 'POST', body }),
+    request<Alert>(`/alerts/${enc(id)}/acknowledge`, { method: 'POST', body }),
   snooze: (id: Id, body: SnoozeBody) =>
-    request<unknown>(`/alerts/${enc(id)}/snooze`, { method: 'POST', body }),
+    request<Alert>(`/alerts/${enc(id)}/snooze`, { method: 'POST', body }),
   override: (id: Id, body: OverrideBody) =>
-    request<unknown>(`/alerts/${enc(id)}/override`, { method: 'POST', body }),
+    request<Alert>(`/alerts/${enc(id)}/override`, { method: 'POST', body }),
   resolve: (id: Id, body: ResolveBody) =>
-    request<unknown>(`/alerts/${enc(id)}/resolve`, { method: 'POST', body }),
+    request<Alert>(`/alerts/${enc(id)}/resolve`, { method: 'POST', body }),
 
   valve: (flatId: Id, o: Sig = {}) => request<ValveInfo>(`/valves/${enc(flatId)}`, o),
   openValve: (flatId: Id, body: ValveCommand) =>
-    request<unknown>(`/valves/${enc(flatId)}/open`, { method: 'POST', body }),
+    request<ValveCommandRecord>(`/valves/${enc(flatId)}/open`, { method: 'POST', body }),
   closeValve: (flatId: Id, body: ValveCommand) =>
-    request<unknown>(`/valves/${enc(flatId)}/close`, { method: 'POST', body }),
-
-  injectFault: (body: InjectFaultBody) =>
-    request<unknown>('/demo/inject-fault', { method: 'POST', body }),
-  clearFault: (flatId: Id) =>
-    request<unknown>('/demo/clear-fault', { method: 'POST', body: { flat_id: flatId } }),
-  setSpeed: (speed: number) => request<unknown>('/demo/set-speed', { method: 'POST', body: { speed } }),
-  demoStatus: (o: Sig = {}) => request<DemoStatus>('/demo/status', o),
+    request<ValveCommandRecord>(`/valves/${enc(flatId)}/close`, { method: 'POST', body }),
 };

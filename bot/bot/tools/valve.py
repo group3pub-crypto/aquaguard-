@@ -1,10 +1,10 @@
-from bot.auth import Role
+from bot.auth import Principal, Role
 from bot.tools.registry import Tool, ToolRegistry
 
 
-async def set_valve(api, args: dict, actor: str) -> str:
-    await api.set_valve(args["unit"], args["action"], actor)
-    return f"Valve for {args['unit']}: {args['action']} command sent."
+async def set_valve(api, args: dict, p: Principal) -> str:
+    cmd = await api.set_valve(args["unit"], args["action"], p.actor)
+    return f"Valve for {args['unit']}: {args['action']} command {cmd.get('status', 'sent')}."
 
 
 def register(reg: ToolRegistry) -> None:
@@ -15,7 +15,7 @@ def register(reg: ToolRegistry) -> None:
             {
                 "type": "object",
                 "properties": {
-                    "unit": {"type": "string", "maxLength": 32},
+                    "unit": {"type": "string", "maxLength": 32, "pattern": r"^[A-Za-z0-9-]+$"},
                     "action": {"type": "string", "enum": ["open", "close"]},
                 },
                 "required": ["unit", "action"],

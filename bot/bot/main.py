@@ -7,18 +7,29 @@ from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
+    ContextTypes,
     MessageHandler,
     filters,
 )
 
 from bot.api_client import ApiClient
+from bot.audit import AuditLog
 from bot.auth import LinkStore
+from bot.confirm import ConfirmStore
 from bot.config import Settings
 from bot.deps import Deps
 from bot.handlers import callbacks, commands, queries
 from bot.poller import run_poller
 from bot.ratelimit import RateLimiter
 from bot.tools import build_default_registry
+
+
+log = logging.getLogger("bot")
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """PTB global error handler: never swallow handler/network errors silently."""
+    log.error("unhandled error while processing update", exc_info=context.error)
 
 
 def build_app(settings: Settings) -> Application:
@@ -33,13 +44,17 @@ def build_app(settings: Settings) -> Application:
         registry=build_default_registry(),
         store=LinkStore(settings.admin_ids, settings.bot_state_file or None),
         limiter=RateLimiter(settings.bot_send_rate),
+        audit=AuditLog(settings.audit_path),
+        confirm=ConfirmStore(),
     )
 
     async def post_init(app: Application) -> None:
-        app.bot_data["poller"] = asyncio.create_task(run_poller(app.bot, deps, settings.bot_poll_interval))
+        app.bot_data["poller"] = asyncio.create_task(run_poller(app.bot, deps, settings.bot_poll_interval, settings.seen_path))
 
     async def post_shutdown(app: Application) -> None:
-        app.bot_data["poller"].cancel()
+        task = app.bot_data["poller"]
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
         await api.aclose()
 
     app = (
@@ -57,11 +72,17 @@ def build_app(settings: Settings) -> Application:
         ("status", commands.status),
         ("alerts", commands.alerts),
         ("report", commands.report),
+        ("usage", commands.usage),
+        ("losses", commands.losses),
         ("valve", commands.valve),
+        ("approve", commands.approve),
+        ("reject", commands.reject),
+        ("revoke", commands.revoke),
     ]:
         app.add_handler(CommandHandler(name, fn))
     app.add_handler(CallbackQueryHandler(callbacks.on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, queries.on_text))
+    app.add_error_handler(on_error)
     return app
 
 

@@ -45,6 +45,10 @@ include = ["app*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
+markers = [
+  "integration: needs real services (TEST_DATABASE_URL, optionally TEST_MQTT_*); skipped otherwise",
+  "mqtt: needs a real MQTT broker (TEST_MQTT_HOST/PORT/USERNAME/PASSWORD)",
+]
 
 [tool.ruff]
 line-length = 100
