@@ -1,0 +1,31 @@
+# Development overrides, applied automatically by `docker compose up`.
+# Use `docker compose -f docker-compose.yml up` to skip them (production-like).
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+
+  backend:
+    read_only: false
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    environment:
+      ENVIRONMENT: development
+      BACKEND_LOG_LEVEL: debug
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./ml/models:/app/ml/models:ro
+
+  dashboard:
+    command: ["npm", "run", "dev"]
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+      - /app/.next
+
+  bot:
+    read_only: false
+    volumes:
+      - ./bot/bot:/app/bot
+      - bot_state:/state
