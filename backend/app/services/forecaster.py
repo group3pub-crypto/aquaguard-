@@ -1,4 +1,4 @@
-"""24h consumption forecast: ML regressor when available, baseline median otherwise."""
+"""24h demand forecast (mean L/min per hour): ML regressor, else baseline median."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _floor_hour(dt: datetime) -> datetime:
 
 
 def forecast_features(series: dict[datetime, float], target: datetime, fallback) -> list[float]:
-    """Feature row for hour `target`; unknown past hours use `fallback(hour)` (baseline litres)."""
+    """Feature row for hour `target`; unknown past hours use `fallback(hour)` (baseline L/min)."""
 
     def val(h: int) -> float:
         t = target - timedelta(hours=h)
@@ -74,15 +74,17 @@ async def generate_forecast(
     baseline = await BaselineRepository(session).active(flat.id)
     slots = baseline.slots if baseline else None
 
-    def baseline_litres(hour: datetime) -> float:
+    def baseline_lpm(hour: datetime) -> float:
         s = slot_stats(slots, hour)
-        return s["median"] * 60 if s else 0.0
+        return s["median"] if s else 0.0
 
     start = _floor_hour(now) - timedelta(hours=HISTORY_HOURS)
-    series: dict[datetime, float] = {}
-    for ts, _flow, vol in await ReadingRepository(session).series(flat.id, start, now):
+    sums: dict[datetime, tuple[float, int]] = {}
+    for ts, flow, _vol in await ReadingRepository(session).series(flat.id, start, now):
         h = _floor_hour(ts)
-        series[h] = series.get(h, 0.0) + vol
+        total, n = sums.get(h, (0.0, 0))
+        sums[h] = (total + flow, n + 1)
+    series: dict[datetime, float] = {h: total / n for h, (total, n) in sums.items()}
     series.pop(_floor_hour(now), None)  # current hour is incomplete
 
     meta = store.metadata.get("forecaster", {})
@@ -95,28 +97,28 @@ async def generate_forecast(
         s = slot_stats(slots, target)
         if use_model:
             try:
-                x = np.asarray([forecast_features(series, target, baseline_litres)])
+                x = np.asarray([forecast_features(series, target, baseline_lpm)])
                 yhat = float(store.forecaster.predict(x)[0])
                 if not math.isfinite(yhat):
                     raise ValueError("non-finite prediction")
             except Exception:
-                yhat, use_model = baseline_litres(target), False
+                yhat, use_model = baseline_lpm(target), False
         else:
-            yhat = baseline_litres(target)
+            yhat = baseline_lpm(target)
         yhat = max(yhat, 0.0)
         series[target] = yhat  # feed back for multi-step lags
         if use_model and resid:
-            half: float | None = Z95 * float(resid)
+            half: float = Z95 * float(resid)
         elif s:
-            half = Z95 * MAD_SCALE * s["mad"] * 60
+            half = Z95 * MAD_SCALE * s["mad"]
         else:
-            half = None
+            half = 0.0
         preds.append(
             {
-                "timestamp": target.isoformat(),
-                "predicted_l": round(yhat, 2),
-                "lower_l": None if half is None else round(max(yhat - half, 0.0), 2),
-                "upper_l": None if half is None else round(yhat + half, 2),
+                "hour": target.isoformat(),
+                "predicted_lpm": round(yhat, 3),
+                "lower": round(max(yhat - half, 0.0), 3),
+                "upper": round(yhat + half, 3),
             }
         )
     fc = await ForecastRepository(session).add(

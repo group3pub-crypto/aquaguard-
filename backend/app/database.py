@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -12,6 +13,21 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
+
+
+def _harden_sqlite(engine: AsyncEngine) -> None:
+    """Enforce FKs and make SAVEPOINTs behave (recommended pysqlite/aiosqlite recipe)."""
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _on_connect(dbapi_conn, _record):
+        dbapi_conn.isolation_level = None
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def _on_begin(conn):
+        conn.exec_driver_sql("BEGIN")
 
 
 class Database:
@@ -22,6 +38,8 @@ class Database:
         elif not url.startswith("sqlite"):
             kwargs.update(pool_pre_ping=True, pool_size=10, max_overflow=10)
         self.engine: AsyncEngine = create_async_engine(url, **kwargs)
+        if url.startswith("sqlite"):
+            _harden_sqlite(self.engine)
         self.sessionmaker = async_sessionmaker(self.engine, expire_on_commit=False)
 
     @asynccontextmanager

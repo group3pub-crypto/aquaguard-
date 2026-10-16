@@ -95,8 +95,8 @@ def extract_features(
     stats = slot_stats(baseline_slots, now)
     f.update(
         mean_flow=float(flows.mean()),
-        max_flow=float(flows.max()),
-        min_flow=float(flows.min()),
+        max_flow=float(np.max(flows)),
+        min_flow=float(np.min(flows)),
         std_flow=float(flows.std()),
         zero_flow_pct=float((flows <= ZERO_FLOW).mean()),
     )
