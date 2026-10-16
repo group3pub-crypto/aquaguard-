@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* All colours are CSS custom properties; tailwind.config.ts references them. */
+:root {
+  --canvas: #ffffff;
+  --panel: #f7f9fa;
+  --ink: #262626;
+  --ink-2: #6b7280;
+  --line: #e8e8e8;
+  --action: #0070d5;
+  --action-ink: #ffffff;
+  --action-soft: #e6f1fb;
+  --error: #f5222d;
+  --error-soft: #fff1f0;
+  --warn: #fa8c16;
+  --warn-soft: #fff7e6;
+  --safe: #52c41a;
+  --safe-soft: #f0faea;
+  --scrim: rgba(0, 0, 0, 0.45);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --canvas: #121416;
+    --panel: #1b1e21;
+    --ink: #f2f4f5;
+    --ink-2: #a3abb2;
+    --line: #2d3236;
+    --action: #3b9bff;
+    --action-ink: #0b0d0f;
+    --action-soft: #15283a;
+    --error: #ff5a62;
+    --error-soft: #3a1618;
+    --warn: #ffa940;
+    --warn-soft: #3a2810;
+    --safe: #73d13d;
+    --safe-soft: #1b2e12;
+    --scrim: rgba(0, 0, 0, 0.65);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --canvas: #121416;
+  --panel: #1b1e21;
+  --ink: #f2f4f5;
+  --ink-2: #a3abb2;
+  --line: #2d3236;
+  --action: #3b9bff;
+  --action-ink: #0b0d0f;
+  --action-soft: #15283a;
+  --error: #ff5a62;
+  --error-soft: #3a1618;
+  --warn: #ffa940;
+  --warn-soft: #3a2810;
+  --safe: #73d13d;
+  --safe-soft: #1b2e12;
+  --scrim: rgba(0, 0, 0, 0.65);
+  color-scheme: dark;
+}
+
+html {
+  background: var(--canvas);
+}
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-canvas p-6;
+  }
+  .btn {
+    @apply inline-flex min-h-[40px] items-center justify-center rounded-pill border border-line bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-panel disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-action bg-action text-action-ink hover:bg-action hover:opacity-90;
+  }
+  .btn-danger {
+    @apply border-error bg-error text-white hover:bg-error hover:opacity-90;
+  }
+  .field {
+    @apply min-h-[40px] w-full rounded-md border border-line bg-canvas px-3 text-sm text-ink placeholder:text-ink-2;
+  }
+  .label {
+    @apply mb-1 block text-sm font-semibold text-ink;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

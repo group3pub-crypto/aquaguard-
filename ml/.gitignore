@@ -1,0 +1,8 @@
+# generated artefacts: trained models, metadata, synthetic data
+models/*
+!models/.gitkeep
+data/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
