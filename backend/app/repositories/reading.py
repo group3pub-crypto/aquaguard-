@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.models import FlowReading
@@ -20,7 +21,30 @@ class ReadingRepository(BaseRepository[FlowReading]):
         return (await self.session.execute(stmt)).first() is not None
 
     async def add_idempotent(self, reading: FlowReading) -> bool:
-        """Insert unless (flat_id, message_id) already stored. Returns True if inserted."""
+        """Insert unless (flat_id, message_id) already stored. Returns True if inserted.
+
+        PostgreSQL: one ``INSERT .. ON CONFLICT DO NOTHING RETURNING id`` (atomic, no failed
+        statement, no savepoint, one round trip). Other dialects: check + savepoint.
+        """
+        if self.session.bind.dialect.name == "postgresql":
+            cols = (
+                "flat_id", "timestamp", "flow_rate", "volume", "pressure", "temperature",
+                "battery_pct", "rssi", "message_id", "received_at",
+            )  # fmt: skip
+            values = {c: getattr(reading, c) for c in cols}
+            if values["received_at"] is None:
+                values.pop("received_at")
+            stmt = (
+                pg_insert(FlowReading)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=["flat_id", "message_id"])
+                .returning(FlowReading.id)
+            )
+            new_id = (await self.session.execute(stmt)).scalar_one_or_none()
+            if new_id is None:
+                return False
+            reading.id = new_id
+            return True
         if await self.exists(reading.flat_id, reading.message_id):
             return False
         try:

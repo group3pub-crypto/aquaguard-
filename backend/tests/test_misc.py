@@ -234,11 +234,11 @@ def test_postgres_upgrade_sql_matches_model_metadata():
     sql = offline_sql("up")
     created = set(re.findall(r"CREATE TABLE (\w+)", sql)) - {"alembic_version"}
     assert created == set(Base.metadata.tables)
-    assert "JSONB" in sql and "gen_random_uuid()" in sql
+    assert "JSONB" in sql and "DEFAULT gen_random_uuid()" not in sql  # ids are client-side
     assert "CREATE TRIGGER trg_alerts_updated_at" in sql and "set_updated_at" in sql
     assert "ON DELETE CASCADE" in sql and "ON DELETE SET NULL" in sql
     assert "WHERE is_active" in sql and "WHERE resolved_at IS NULL" in sql
-    for table, trigger in (("societies", 1), ("flats", 1), ("alerts", 1)):
+    for table, trigger in (("societies", 1), ("flats", 1), ("alerts", 1), ("sensor_health", 1)):
         assert sql.count(f"CREATE TRIGGER trg_{table}_updated_at") == trigger
 
 

@@ -24,6 +24,7 @@ dependencies = [
   "numpy>=1.26",
   "scikit-learn>=1.4",
   "joblib>=1.3",
+  "aquaguard-features>=0.1",  # libs/aquaguard_features: pip install -e libs/aquaguard_features
   "email-validator>=2.0",
 ]
 

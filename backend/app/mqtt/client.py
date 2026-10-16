@@ -18,10 +18,14 @@ Handler = Callable[[str, bytes], Awaitable[None]]
 
 
 class MqttService:
-    def __init__(self, settings: Settings, handler: Handler) -> None:
+    def __init__(
+        self, settings: Settings, handler: Handler, *, client_id: str = "aquaguard-backend"
+    ) -> None:
         self.settings = settings
         self.handler = handler
+        self.client_id = client_id
         self.connected = False
+        self.connect_count = 0
         self._client: aiomqtt.Client | None = None
 
     async def publish(self, topic: str, payload: dict[str, Any]) -> None:
@@ -40,16 +44,27 @@ class MqttService:
                     port=s.mqtt_port,
                     username=s.mqtt_username,
                     password=s.mqtt_password,
-                    identifier="aquaguard-backend",
+                    identifier=self.client_id,
+                    keepalive=30,
+                    # persistent session: the broker queues QoS1 messages while we restart
+                    # and redelivers them (possible duplicates are absorbed by message_id)
+                    clean_session=False,
                 ) as client:
-                    self._client, self.connected, backoff = client, True, 1.0
+                    # (re)subscribe on EVERY connection; only then report "connected"
                     for topic in SUBSCRIPTIONS:
                         await client.subscribe(topic, qos=1)
-                    log.info("mqtt_connected", host=s.mqtt_host)
+                    self._client, self.connected, backoff = client, True, 1.0
+                    self.connect_count += 1
+                    log.info("mqtt_connected", host=s.mqtt_host, n=self.connect_count)
                     async for msg in client.messages:
                         await self.handler(str(msg.topic), bytes(msg.payload or b""))
+                    log.warning("mqtt_message_stream_ended")
+            except asyncio.CancelledError:
+                raise
             except aiomqtt.MqttError as exc:
                 log.warning("mqtt_disconnected", error=str(exc), retry_in=backoff)
+            except Exception:  # a bug in the handler must not kill the ingest loop for good
+                log.exception("mqtt_loop_error", retry_in=backoff)
             finally:
                 self.connected, self._client = False, None
             await asyncio.sleep(backoff)

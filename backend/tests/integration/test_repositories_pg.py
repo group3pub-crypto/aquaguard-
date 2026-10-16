@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Anomaly, Baseline, Flat, FlowReading, Society
@@ -64,13 +65,15 @@ async def test_jsonb_roundtrip_and_operators(pgdb):
     async with pgdb.session() as s:
         b = await BaselineRepository(s).active(fid)
         assert b.slots == slots
-        col = (await s.execute(sa.text("SELECT pg_typeof(slots)::text FROM baselines"))).scalar_one()
+        col = (
+            await s.execute(sa.text("SELECT pg_typeof(slots)::text FROM baselines"))
+        ).scalar_one()
         assert col == "jsonb"
         hit = (
             await s.execute(
-                sa.select(sa.func.count()).select_from(Anomaly).where(
-                    Anomaly.features["nested"]["x"].as_json().contains([1])
-                )
+                sa.select(sa.func.count())
+                .select_from(Anomaly)
+                .where(sa.cast(Anomaly.features, JSONB).contains({"nested": {"x": [1]}}))
             )
         ).scalar_one()
         assert hit == 1
@@ -131,7 +134,9 @@ async def test_reading_pagination_is_stable_and_complete(pgdb):
             seen += [r.message_id for r in page]
         assert len(seen) == len(set(seen)) == 95
         assert seen == sorted(seen, reverse=True)  # newest first
-        ranged = await repo.find(fid, start=T0 + timedelta(minutes=10), end=T0 + timedelta(minutes=19))
+        ranged = await repo.find(
+            fid, start=T0 + timedelta(minutes=10), end=T0 + timedelta(minutes=19)
+        )
         assert len(ranged) == 10
         assert await repo.count(fid) == 95
         assert (await repo.latest(fid)).message_id == f"{94:08x}"
@@ -145,8 +150,12 @@ async def test_anomaly_filters_and_open_lookup(pgdb):
         for i, (t, res) in enumerate([("leak", None), ("leak", T0), ("burst", None)]):
             s.add(
                 Anomaly(
-                    flat_id=fid, detected_at=T0 + timedelta(minutes=i), anomaly_type=t,
-                    confidence=0.9, severity=0.9, resolved_at=res,
+                    flat_id=fid,
+                    detected_at=T0 + timedelta(minutes=i),
+                    anomaly_type=t,
+                    confidence=0.9,
+                    severity=0.9,
+                    resolved_at=res,
                 )
             )
     async with pgdb.session() as s:
@@ -177,4 +186,6 @@ async def test_deleting_society_cascades_through_orm_data(pgdb):
         await s.execute(sa.delete(Society))
     async with pgdb.session() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(Flat))).scalar_one() == 0
-        assert (await s.execute(sa.select(sa.func.count()).select_from(FlowReading))).scalar_one() == 0
+        assert (
+            await s.execute(sa.select(sa.func.count()).select_from(FlowReading))
+        ).scalar_one() == 0
