@@ -1,4 +1,5 @@
 """Valve commands: persist as pending, publish over MQTT, confirm on device ack."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -31,11 +32,22 @@ async def send_valve_command(
     now = now or datetime.now(UTC)
     repo = ValveRepository(session)
     cmd = await repo.create(
-        flat_id=flat.id, alert_id=alert_id, command=command, source=source,
-        issued_by=issued_by, issued_at=now, status="pending",
+        flat_id=flat.id,
+        alert_id=alert_id,
+        command=command,
+        source=source,
+        issued_by=issued_by,
+        issued_at=now,
+        status="pending",
     )
     slug = await FlatRepository(session).society_slug(flat)
-    payload = {"v": 1, "id": cmd.id.hex[:8], "cmd": command, "src": source, "ts": int(now.timestamp())}
+    payload = {
+        "v": 1,
+        "id": cmd.id.hex[:8],
+        "cmd": command,
+        "src": source,
+        "ts": int(now.timestamp()),
+    }
     try:
         if slug is None:
             raise LookupError("society not found")
@@ -44,13 +56,24 @@ async def send_valve_command(
         cmd.status = "failed"
         log.warning("valve_publish_failed", flat=str(flat.id), error=str(exc))
     await AuditRepository(session).record(
-        entity_type="valve", entity_id=cmd.id, action=f"valve_{command}_{cmd.status}", actor=issued_by,
-        details={"source": source, "reason": reason, "alert_id": str(alert_id) if alert_id else None},
-        flat_id=flat.id, society_id=flat.society_id,
+        entity_type="valve",
+        entity_id=cmd.id,
+        action=f"valve_{command}_{cmd.status}",
+        actor=issued_by,
+        details={
+            "source": source,
+            "reason": reason,
+            "alert_id": str(alert_id) if alert_id else None,
+        },
+        flat_id=flat.id,
+        society_id=flat.society_id,
     )
     await rt.ws.broadcast(
-        {"type": "valve", "event": "command",
-         "command": ValveCommandOut.model_validate(cmd).model_dump(mode="json")},
+        {
+            "type": "valve",
+            "event": "command",
+            "command": ValveCommandOut.model_validate(cmd).model_dump(mode="json"),
+        },
         [str(flat.id), str(flat.society_id)],
     )
     return cmd
@@ -62,15 +85,23 @@ async def handle_ack(
     """Device reported its valve state. Confirms the matching pending command, if any."""
     flat.valve_state = state
     match = next(
-        (c for c in await ValveRepository(session).pending_for_flat(flat.id) if c.id.hex[:8] == short_id),
+        (
+            c
+            for c in await ValveRepository(session).pending_for_flat(flat.id)
+            if c.id.hex[:8] == short_id
+        ),
         None,
     )
     if match:
         match.status, match.confirmed_at = "confirmed", now
     await AuditRepository(session).record(
-        entity_type="valve", entity_id=match.id if match else flat.id, action="valve_state_ack",
-        actor="device", details={"state": state, "cmd_id": short_id, "matched": bool(match)},
-        flat_id=flat.id, society_id=flat.society_id,
+        entity_type="valve",
+        entity_id=match.id if match else flat.id,
+        action="valve_state_ack",
+        actor="device",
+        details={"state": state, "cmd_id": short_id, "matched": bool(match)},
+        flat_id=flat.id,
+        society_id=flat.society_id,
     )
     await rt.ws.broadcast(
         {"type": "valve", "event": "state", "flat_id": str(flat.id), "state": state},

@@ -1,4 +1,5 @@
 """Wire formats for MQTT payloads."""
+
 from __future__ import annotations
 
 import time

@@ -1,0 +1,18 @@
+// Copy to config.h (git-ignored) and fill in. Never commit real credentials.
+#pragma once
+
+#define WIFI_SSID       "your-wifi-ssid"
+#define WIFI_PASSWORD   "your-wifi-password"
+
+#define MQTT_HOST       "broker.example.local"
+#define MQTT_PORT       1883
+#define MQTT_USER       ""          // empty = anonymous
+#define MQTT_PASSWORD   ""
+
+#define SOCIETY_SLUG    "demo"      // topic: aquaguard/<society>/<unit>/...
+#define FLAT_UNIT       "101"
+
+#define FLOW_PIN        27          // YF-S201 signal (interrupt-capable, 3.3 V logic!)
+#define VALVE_RELAY_PIN 26          // relay for the normally-open solenoid valve
+#define VALVE_CLOSE_LEVEL HIGH      // relay level that energises (closes) the valve
+#define BATTERY_ADC_PIN 34          // optional divider; set -1 to report 100

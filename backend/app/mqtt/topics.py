@@ -1,4 +1,5 @@
 """Topic helpers: aquaguard/{society_slug}/{flat_unit}/flow|heartbeat|valve/cmd|valve/state."""
+
 from __future__ import annotations
 
 import re

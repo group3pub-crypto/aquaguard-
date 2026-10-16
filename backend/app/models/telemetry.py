@@ -78,9 +78,7 @@ class Forecast(Base):
 
 class SensorHealth(Base):
     __tablename__ = "sensor_health"
-    __table_args__ = (
-        sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="status"),
-    )
+    __table_args__ = (sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="status"),)
 
     flat_id: Mapped[uuid.UUID] = mapped_column(
         sa.ForeignKey("flats.id", ondelete="CASCADE"), primary_key=True
@@ -89,7 +87,9 @@ class SensorHealth(Base):
     status: Mapped[str] = mapped_column(
         sa.String(10), nullable=False, default="offline", server_default="offline"
     )
-    missed_readings: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0, server_default="0")
+    missed_readings: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=sa.func.now()
     )

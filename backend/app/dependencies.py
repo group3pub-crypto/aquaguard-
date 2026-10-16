@@ -38,7 +38,8 @@ _UNAUTH = HTTPException(
 
 
 async def get_current_user(
-    rt: RT, session: Session,
+    rt: RT,
+    session: Session,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
 ) -> User | None:
     """None when no token is sent; 401 when a token is sent but invalid or the user is gone."""

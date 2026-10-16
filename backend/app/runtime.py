@@ -1,4 +1,5 @@
 """Process-wide runtime container stored on app.state.rt."""
+
 from __future__ import annotations
 
 import time
@@ -45,8 +46,13 @@ class Runtime:
     dead_letters: deque = field(default_factory=deque)
     counters: dict[str, int] = field(
         default_factory=lambda: {
-            "flow_ok": 0, "flow_duplicate": 0, "flow_failed": 0, "heartbeat_ok": 0,
-            "heartbeat_failed": 0, "valve_ack_ok": 0, "valve_ack_failed": 0,
+            "flow_ok": 0,
+            "flow_duplicate": 0,
+            "flow_failed": 0,
+            "heartbeat_ok": 0,
+            "heartbeat_failed": 0,
+            "valve_ack_ok": 0,
+            "valve_ack_failed": 0,
         }
     )
     demo: DemoState = field(default_factory=DemoState)

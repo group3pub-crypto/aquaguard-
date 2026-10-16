@@ -1,4 +1,5 @@
 """structlog setup and request-id / access-log middleware."""
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,9 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             log.info(
-                "request", method=request.method, path=request.url.path, status=status,
+                "request",
+                method=request.method,
+                path=request.url.path,
+                status=status,
                 duration_ms=round((time.perf_counter() - start) * 1000, 1),
             )

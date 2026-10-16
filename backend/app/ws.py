@@ -1,4 +1,5 @@
 """WebSocket connection manager with optional flat/society filters and a connection cap."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +43,7 @@ class ConnectionManager:
             self._clients.remove(client)
 
     async def broadcast(self, message: dict, key: str | Iterable[str] | None = None) -> int:
-        """Send to every client whose filters are empty or contain one of `key`. Returns sent count."""
+        """Send to clients with no filters or a filter matching `key`. Returns sent count."""
         keys = {key} if isinstance(key, str) else set(key or ())
         targets = [c for c in list(self._clients) if not c.filters or (c.filters & keys)]
 

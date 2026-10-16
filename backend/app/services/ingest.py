@@ -1,16 +1,21 @@
 """MQTT message ingestion: validation, idempotent storage, detection trigger, sensor health."""
+
 from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from typing import TypeVar
 
 import structlog
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.models import Alert, Flat, FlowReading
 from app.mqtt.topics import ParsedTopic, parse_topic
 from app.repositories import (
-    AuditRepository, BaselineRepository, FlatRepository, ReadingRepository,
+    AuditRepository,
+    BaselineRepository,
+    FlatRepository,
+    ReadingRepository,
     SensorHealthRepository,
 )
 from app.runtime import Runtime
@@ -22,6 +27,7 @@ log = structlog.get_logger(__name__)
 LATE_AFTER = timedelta(minutes=2)
 OFFLINE_AFTER = timedelta(minutes=5)
 EXPECTED_INTERVAL_S = 60.0
+M = TypeVar("M", bound=BaseModel)
 
 
 class IngestError(Exception):
@@ -51,7 +57,11 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
         if parsed is None:
             rt.dead_letter(topic, "unrecognised_topic")
             return
-        counter = {"flow": "flow_failed", "heartbeat": "heartbeat_failed", "valve_state": "valve_ack_failed"}[parsed.kind]
+        counter = {
+            "flow": "flow_failed",
+            "heartbeat": "heartbeat_failed",
+            "valve_state": "valve_ack_failed",
+        }[parsed.kind]
         if len(payload) > MAX_PAYLOAD_BYTES:
             _fail(rt, counter, topic, "oversize_payload")
             return
@@ -71,9 +81,9 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
         log.exception("ingest_dispatch_failed")
 
 
-def _parse[T](model: type[T], payload: bytes) -> T:
+def _parse(model: type[M], payload: bytes) -> M:
     try:
-        return model.model_validate_json(payload)  # type: ignore[attr-defined]
+        return model.model_validate_json(payload)
     except ValidationError as exc:
         first = exc.errors()[0]
         raise IngestError(f"invalid_payload:{'.'.join(map(str, first['loc']))}") from None
@@ -93,9 +103,16 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     async with rt.db.session() as session:
         flat = await _resolve_flat(session, parsed)
         reading = FlowReading(
-            flat_id=flat.id, timestamp=ts, flow_rate=data.flow, volume=data.vol, pressure=data.psi,
-            temperature=data.tmp, battery_pct=data.bat, rssi=data.rssi,
-            message_id=data.id.lower(), received_at=now,
+            flat_id=flat.id,
+            timestamp=ts,
+            flow_rate=data.flow,
+            volume=data.vol,
+            pressure=data.psi,
+            temperature=data.tmp,
+            battery_pct=data.bat,
+            rssi=data.rssi,
+            message_id=data.id.lower(),
+            received_at=now,
         )
         if not await ReadingRepository(session).add_idempotent(reading):
             rt.counters["flow_duplicate"] += 1
@@ -125,7 +142,9 @@ async def handle_valve_state(rt: Runtime, parsed: ParsedTopic, payload: bytes) -
     data = _parse(ValveAckPayload, payload)
     async with rt.db.session() as session:
         flat = await _resolve_flat(session, parsed)
-        await valve_control.handle_ack(session, rt, flat, data.cmd_id, data.state, datetime.now(UTC))
+        await valve_control.handle_ack(
+            session, rt, flat, data.cmd_id, data.state, datetime.now(UTC)
+        )
     rt.counters["valve_ack_ok"] += 1
 
 
@@ -150,14 +169,25 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
             alert = await alert_engine.process_anomaly(session, rt, flat, outcome.anomaly, now)
             if outcome.created:
                 await AuditRepository(session).record(
-                    entity_type="anomaly", entity_id=outcome.anomaly.id, action="anomaly_detected",
-                    actor="system", details={"type": outcome.anomaly.anomaly_type,
-                                             "severity": outcome.anomaly.severity},
-                    flat_id=flat.id, society_id=flat.society_id,
+                    entity_type="anomaly",
+                    entity_id=outcome.anomaly.id,
+                    action="anomaly_detected",
+                    actor="system",
+                    details={
+                        "type": outcome.anomaly.anomaly_type,
+                        "severity": outcome.anomaly.severity,
+                    },
+                    flat_id=flat.id,
+                    society_id=flat.society_id,
                 )
                 await rt.ws.broadcast(
-                    {"type": "anomaly", "flat_id": str(flat.id), "anomaly_id": str(outcome.anomaly.id),
-                     "anomaly_type": outcome.anomaly.anomaly_type, "severity": outcome.anomaly.severity},
+                    {
+                        "type": "anomaly",
+                        "flat_id": str(flat.id),
+                        "anomaly_id": str(outcome.anomaly.id),
+                        "anomaly_type": outcome.anomaly.anomaly_type,
+                        "severity": outcome.anomaly.severity,
+                    },
                     [str(flat.id), str(flat.society_id)],
                 )
             return alert
@@ -174,7 +204,9 @@ async def refresh_sensor_health(rt: Runtime, now: datetime) -> int:
         for row in await SensorHealthRepository(session).all():
             status = sensor_status(row.last_seen, now)
             row.missed_readings = (
-                int((now - row.last_seen).total_seconds() // EXPECTED_INTERVAL_S) if row.last_seen else 0
+                int((now - row.last_seen).total_seconds() // EXPECTED_INTERVAL_S)
+                if row.last_seen
+                else 0
             )
             if status != row.status:
                 row.status = status
@@ -188,7 +220,9 @@ async def refresh_sensor_health(rt: Runtime, now: datetime) -> int:
     return changed
 
 
-async def retrain_baselines(rt: Runtime, now: datetime, max_age: timedelta = timedelta(hours=24)) -> int:
+async def retrain_baselines(
+    rt: Runtime, now: datetime, max_age: timedelta = timedelta(hours=24)
+) -> int:
     n = 0
     async with rt.db.session() as session:
         for flat in await FlatRepository(session).find(limit=10_000):
@@ -214,5 +248,3 @@ async def run_maintenance(rt: Runtime, now: datetime | None = None) -> None:
         await refresh_sensor_health(rt, now)
     except Exception:
         log.exception("maintenance_failed")
-
-

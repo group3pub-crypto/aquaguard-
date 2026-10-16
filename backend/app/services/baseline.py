@@ -1,4 +1,5 @@
 """Hour-of-week baselines: 168 slots of robust statistics, versioned per flat."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -36,7 +37,15 @@ def hour_of_week(dt: datetime) -> int:
 
 def empty_slots() -> list[dict]:
     return [
-        {"slot": i, "median": 0.0, "mad": 0.0, "p25": 0.0, "p75": 0.0, "p95": 0.0, "sample_count": 0}
+        {
+            "slot": i,
+            "median": 0.0,
+            "mad": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0,
+            "sample_count": 0,
+        }
         for i in range(SLOTS)
     ]
 
@@ -95,15 +104,23 @@ async def train_baseline(
     )
     flat.baseline_status = status_for(days)
     await AuditRepository(session).record(
-        entity_type="baseline", entity_id=baseline.id, action="baseline_trained", actor=actor,
+        entity_type="baseline",
+        entity_id=baseline.id,
+        action="baseline_trained",
+        actor=actor,
         details={"version": baseline.version, "sample_days": days, "readings": len(rows)},
-        flat_id=flat.id, society_id=flat.society_id,
+        flat_id=flat.id,
+        society_id=flat.society_id,
     )
     return baseline
 
 
 def is_stale(baseline: Baseline | None, now: datetime) -> bool:
-    return baseline is not None and baseline.trained_to is not None and now - baseline.trained_to > STALE_AFTER
+    return (
+        baseline is not None
+        and baseline.trained_to is not None
+        and now - baseline.trained_to > STALE_AFTER
+    )
 
 
 async def refresh_status(session: AsyncSession, flat: Flat, now: datetime) -> str:

@@ -36,8 +36,12 @@ class AuditRepository(BaseRepository[AuditLog]):
         )
 
     async def find(
-        self, *, entity_type: str | None = None, action: str | None = None,
-        limit: int = 50, offset: int = 0,
+        self,
+        *,
+        entity_type: str | None = None,
+        action: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[AuditLog]:
         stmt = select(AuditLog).order_by(AuditLog.id.desc())
         if entity_type:

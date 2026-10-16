@@ -122,7 +122,9 @@ class AlertOut(ORM):
 
 
 class AcknowledgeRequest(BaseModel):
-    acknowledged_by: str | None = Field(None, max_length=100, description="Ignored; actor is the caller")
+    acknowledged_by: str | None = Field(
+        None, max_length=100, description="Ignored; actor is the caller"
+    )
 
 
 class SnoozeRequest(BaseModel):

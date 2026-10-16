@@ -1,4 +1,5 @@
 """Application settings. Fails closed: production refuses to start without a strong secret."""
+
 from __future__ import annotations
 
 import secrets
@@ -13,9 +14,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 log = structlog.get_logger(__name__)
 
 PLACEHOLDER_KEYS = {
-    "changeme", "change-me", "change_me", "secret", "secret_key", "secretkey", "password",
-    "your-secret-key", "your_secret_key", "change-me-in-production", "changeme-in-production",
-    "dev-secret", "dev-secret-key", "supersecret", "super-secret", "default", "example", "test",
+    "changeme",
+    "change-me",
+    "change_me",
+    "secret",
+    "secret_key",
+    "secretkey",
+    "password",
+    "your-secret-key",
+    "your_secret_key",
+    "change-me-in-production",
+    "changeme-in-production",
+    "dev-secret",
+    "dev-secret-key",
+    "supersecret",
+    "super-secret",
+    "default",
+    "example",
+    "test",
 }
 MIN_SECRET_LEN = 32
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -84,17 +100,23 @@ class Settings(BaseSettings):
             if self.is_production:
                 raise ValueError("SECRET_KEY is required in production")
             self.secret_key = secrets.token_urlsafe(48)
-            log.warning("secret_key_generated", note="random per-process key; tokens reset on restart")
-        elif self.is_production and (_is_placeholder(self.secret_key) or len(self.secret_key) < MIN_SECRET_LEN):
+            log.warning(
+                "secret_key_generated", note="random per-process key; tokens reset on restart"
+            )
+        elif self.is_production and (
+            _is_placeholder(self.secret_key) or len(self.secret_key) < MIN_SECRET_LEN
+        ):
             raise ValueError(
-                f"SECRET_KEY must be a non-placeholder value of at least {MIN_SECRET_LEN} characters"
+                f"SECRET_KEY must be non-placeholder and >= {MIN_SECRET_LEN} characters"
             )
         if self.demo_mode or self.seed_demo_data:
             for attr in ("demo_admin_password", "demo_resident_password"):
                 if getattr(self, attr):
                     continue
                 if self.is_production:
-                    raise ValueError(f"{attr.upper()} must be set when demo mode is on in production")
+                    raise ValueError(
+                        f"{attr.upper()} must be set when demo mode is on in production"
+                    )
                 generated = secrets.token_urlsafe(12)
                 setattr(self, attr, generated)
                 log.warning("demo_password_generated", setting=attr, value=generated)

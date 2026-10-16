@@ -1,4 +1,5 @@
 """Repository base: all DB access goes through subclasses of this."""
+
 from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
@@ -34,5 +35,7 @@ class BaseRepository(Generic[T]):
 
     async def _count(self, stmt: Select) -> int:
         return int(
-            (await self.session.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+            (
+                await self.session.execute(select(func.count()).select_from(stmt.subquery()))
+            ).scalar_one()
         )

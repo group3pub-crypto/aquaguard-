@@ -11,7 +11,15 @@ from app.repositories.user import UserRepository
 from app.repositories.valve import ValveRepository
 
 __all__ = [
-    "AlertRepository", "AnomalyRepository", "AuditRepository", "BaselineRepository",
-    "FlatRepository", "ForecastRepository", "ReadingRepository", "SensorHealthRepository",
-    "SocietyRepository", "UserRepository", "ValveRepository",
+    "AlertRepository",
+    "AnomalyRepository",
+    "AuditRepository",
+    "BaselineRepository",
+    "FlatRepository",
+    "ForecastRepository",
+    "ReadingRepository",
+    "SensorHealthRepository",
+    "SocietyRepository",
+    "UserRepository",
+    "ValveRepository",
 ]

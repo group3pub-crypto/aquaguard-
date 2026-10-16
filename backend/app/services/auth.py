@@ -35,21 +35,30 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(settings: Settings, user: User, now: datetime | None = None) -> tuple[str, int]:
+def create_access_token(
+    settings: Settings, user: User, now: datetime | None = None
+) -> tuple[str, int]:
     now = now or datetime.now(UTC)
     exp = now + timedelta(minutes=settings.access_token_minutes)
     payload = {
-        "sub": str(user.id), "username": user.username, "role": user.role,
-        "iat": int(now.timestamp()), "exp": int(exp.timestamp()),
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM), settings.access_token_minutes * 60
+    return jwt.encode(
+        payload, settings.secret_key, algorithm=ALGORITHM
+    ), settings.access_token_minutes * 60
 
 
 def decode_token(settings: Settings, token: str) -> TokenClaims | None:
     try:
         data = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         return TokenClaims(
-            sub=str(data["sub"]), username=str(data["username"]), role=str(data["role"]),
+            sub=str(data["sub"]),
+            username=str(data["username"]),
+            role=str(data["role"]),
             exp=datetime.fromtimestamp(data["exp"], UTC),
         )
     except (JWTError, KeyError, TypeError, ValueError):
@@ -70,6 +79,9 @@ async def register_user(
     if await repo.get_by_username(username):
         return None
     return await repo.create(
-        id=uuid.uuid4(), username=username, name=name, role="resident",
+        id=uuid.uuid4(),
+        username=username,
+        name=name,
+        role="resident",
         hashed_password=hash_password(password, settings.bcrypt_rounds),
     )

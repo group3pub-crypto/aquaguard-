@@ -32,7 +32,9 @@ class AlertRepository(BaseRepository[Alert]):
         return await self._all(stmt.limit(limit).offset(offset))
 
     async def active(self, flat_ids: list[uuid.UUID] | None = None) -> list[Alert]:
-        stmt = select(Alert).where(Alert.state.in_(OPEN_STATES)).order_by(Alert.severity_score.desc())
+        stmt = (
+            select(Alert).where(Alert.state.in_(OPEN_STATES)).order_by(Alert.severity_score.desc())
+        )
         if flat_ids is not None:
             stmt = stmt.where(Alert.flat_id.in_(flat_ids))
         return await self._all(stmt)

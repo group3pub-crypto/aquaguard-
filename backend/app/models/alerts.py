@@ -12,7 +12,14 @@ from app.models.core import _in
 
 ANOMALY_TYPES = ("leak", "burst", "overuse", "running_toilet", "dripping_tap", "unknown")
 ALERT_STATES = (
-    "nudge", "alert", "ticket", "auto_shutoff", "acknowledged", "snoozed", "overridden", "resolved",
+    "nudge",
+    "alert",
+    "ticket",
+    "auto_shutoff",
+    "acknowledged",
+    "snoozed",
+    "overridden",
+    "resolved",
 )
 VALVE_SOURCES = ("auto", "manual_dashboard", "manual_bot", "manual_override")
 CMD_STATUSES = ("pending", "confirmed", "failed", "timeout")
@@ -133,7 +140,9 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     actor: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     details: Mapped[dict[str, Any] | None] = mapped_column(JSONType)
-    flat_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("flats.id", ondelete="SET NULL"))
+    flat_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("flats.id", ondelete="SET NULL")
+    )
     society_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("societies.id", ondelete="SET NULL")
     )

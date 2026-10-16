@@ -1,4 +1,5 @@
 """Anomaly detection: feature extraction, ML classification with rule fallback, SHAP, severity."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +8,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +23,20 @@ from app.services.baseline import MAD_SCALE, local, slot_stats
 log = structlog.get_logger(__name__)
 
 FEATURE_NAMES = [
-    "mean_flow", "max_flow", "min_flow", "std_flow", "baseline_deviation", "night_min_flow",
-    "duration_above_base", "rate_of_change", "hour_of_day", "day_of_week", "is_night",
-    "rolling_volume_1h", "pct_above_p95", "zero_flow_pct",
+    "mean_flow",
+    "max_flow",
+    "min_flow",
+    "std_flow",
+    "baseline_deviation",
+    "night_min_flow",
+    "duration_above_base",
+    "rate_of_change",
+    "hour_of_day",
+    "day_of_week",
+    "is_night",
+    "rolling_volume_1h",
+    "pct_above_p95",
+    "zero_flow_pct",
 ]
 WINDOW = timedelta(minutes=15)
 WINDOW_MIN = 15
@@ -31,7 +44,11 @@ MIN_READINGS = 3
 MAX_GAP_S = 300.0
 ZERO_FLOW = 0.01
 TYPE_WEIGHT = {
-    "burst": 1.0, "leak": 0.7, "running_toilet": 0.7, "dripping_tap": 0.5, "overuse": 0.3,
+    "burst": 1.0,
+    "leak": 0.7,
+    "running_toilet": 0.7,
+    "dripping_tap": 0.5,
+    "overuse": 0.3,
     "unknown": 0.5,
 }
 ML_TYPES = {"leak", "burst", "overuse"}
@@ -47,12 +64,14 @@ def _durations(ts: list[datetime]) -> list[float]:
     """Seconds each sample 'covers' (gap to next sample, capped; last = median gap)."""
     if not ts:
         return []
-    gaps = [min((b - a).total_seconds(), MAX_GAP_S) for a, b in zip(ts, ts[1:], strict=False)]
+    gaps = [min((b - a).total_seconds(), MAX_GAP_S) for a, b in pairwise(ts)]
     last = float(np.median(gaps)) if gaps else 60.0
     return [*gaps, last]
 
 
-def extract_features(readings, baseline_slots: list[dict] | None, now: datetime) -> dict[str, float]:
+def extract_features(
+    readings, baseline_slots: list[dict] | None, now: datetime
+) -> dict[str, float]:
     """14 model features from a <=1h reading history; stats use the trailing 15 minutes."""
     now = now if now.tzinfo else now.replace(tzinfo=UTC)
     pts = sorted(
@@ -63,7 +82,11 @@ def extract_features(readings, baseline_slots: list[dict] | None, now: datetime)
     hour_pts = [p for p in pts if p[0] >= now - timedelta(hours=1)]
     d = local(now)
     f = dict.fromkeys(FEATURE_NAMES, 0.0)
-    f.update(hour_of_day=float(d.hour), day_of_week=float(d.weekday()), is_night=float(is_night_hour(d.hour)))
+    f.update(
+        hour_of_day=float(d.hour),
+        day_of_week=float(d.weekday()),
+        is_night=float(is_night_hour(d.hour)),
+    )
     if not win:
         return f
     ts = [p[0] for p in win]
@@ -71,14 +94,19 @@ def extract_features(readings, baseline_slots: list[dict] | None, now: datetime)
     dur = np.asarray(_durations(ts))
     stats = slot_stats(baseline_slots, now)
     f.update(
-        mean_flow=float(flows.mean()), max_flow=float(flows.max()), min_flow=float(flows.min()),
-        std_flow=float(flows.std()), zero_flow_pct=float((flows <= ZERO_FLOW).mean()),
+        mean_flow=float(flows.mean()),
+        max_flow=float(flows.max()),
+        min_flow=float(flows.min()),
+        std_flow=float(flows.std()),
+        zero_flow_pct=float((flows <= ZERO_FLOW).mean()),
     )
     night = [fl for t, fl in win if is_night_hour(local(t).hour)]
     f["night_min_flow"] = float(min(night)) if night else f["min_flow"]
     if stats:
         scale = max(MAD_SCALE * stats["mad"], 0.25)
-        f["baseline_deviation"] = float(np.clip((f["mean_flow"] - stats["median"]) / scale, -100, 100))
+        f["baseline_deviation"] = float(
+            np.clip((f["mean_flow"] - stats["median"]) / scale, -100, 100)
+        )
         above = flows > stats["median"] + 3 * scale
         f["duration_above_base"] = float(dur[above].sum() / 60.0)
         f["pct_above_p95"] = float((flows > stats["p95"]).mean())
@@ -87,7 +115,9 @@ def extract_features(readings, baseline_slots: list[dict] | None, now: datetime)
         x = np.asarray([(t - ts[0]).total_seconds() / 60.0 for t in ts])
         f["rate_of_change"] = float(np.polyfit(x, flows, 1)[0])
     h_ts = [p[0] for p in hour_pts]
-    f["rolling_volume_1h"] = float((np.asarray([p[1] for p in hour_pts]) * np.asarray(_durations(h_ts))).sum() / 60.0)
+    f["rolling_volume_1h"] = float(
+        (np.asarray([p[1] for p in hour_pts]) * np.asarray(_durations(h_ts))).sum() / 60.0
+    )
     return {k: float(v) for k, v in f.items()}
 
 
@@ -108,7 +138,9 @@ def _clip(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def classify_anomaly_rules(features: dict[str, float], baseline_median: float = 0.0) -> Detection | None:
+def classify_anomaly_rules(
+    features: dict[str, float], baseline_median: float = 0.0
+) -> Detection | None:
     """Deterministic fallback classifier. Returns None for normal behaviour."""
     g = features.get
     mean, mx, mn, std = g("mean_flow", 0), g("max_flow", 0), g("min_flow", 0), g("std_flow", 0)
@@ -120,25 +152,50 @@ def classify_anomaly_rules(features: dict[str, float], baseline_median: float = 
 
     def det(t: str, conf: float, loss: float, *reasons: tuple[str, str]) -> Detection:
         return Detection(
-            t, round(_clip(conf), 3), round(max(loss, 0.0), 3), "rules",
+            t,
+            round(_clip(conf), 3),
+            round(max(loss, 0.0), 3),
+            "rules",
             [{"feature": k, "value": round(float(g(k, 0)), 3), "note": n} for k, n in reasons],
         )
 
     if continuous and mx >= 15 and mean >= 10 and (dev >= 5 or dev == 0):
-        return det("burst", 0.7 + 0.2 * min(mean / 30, 1) + 0.1 * min(abs(dev) / 10, 1), mean,
-                   ("mean_flow", "sustained very high flow"), ("zero_flow_pct", "flow never stops"))
+        return det(
+            "burst",
+            0.7 + 0.2 * min(mean / 30, 1) + 0.1 * min(abs(dev) / 10, 1),
+            mean,
+            ("mean_flow", "sustained very high flow"),
+            ("zero_flow_pct", "flow never stops"),
+        )
     if night and continuous and night_min >= 0.15:
-        return det("leak", 0.6 + 0.35 * min(night_min / 1.0, 1), night_min,
-                   ("night_min_flow", "flow does not drop to zero at night"))
+        return det(
+            "leak",
+            0.6 + 0.35 * min(night_min / 1.0, 1),
+            night_min,
+            ("night_min_flow", "flow does not drop to zero at night"),
+        )
     if not night and continuous and 0.15 <= mn <= 4 and std <= 0.35 * max(mean, 1e-9):
-        return det("running_toilet", 0.55 + 0.3 * min(mn / 2.0, 1), mn,
-                   ("min_flow", "steady low flow without pauses"), ("std_flow", "very low variability"))
+        return det(
+            "running_toilet",
+            0.55 + 0.3 * min(mn / 2.0, 1),
+            mn,
+            ("min_flow", "steady low flow without pauses"),
+            ("std_flow", "very low variability"),
+        )
     if 0.02 <= mean < 0.15 and mx < 0.6:
-        return det("dripping_tap", 0.5 + 0.3 * min(mean / 0.15, 1), mean,
-                   ("mean_flow", "persistent trickle"))
+        return det(
+            "dripping_tap",
+            0.5 + 0.3 * min(mean / 0.15, 1),
+            mean,
+            ("mean_flow", "persistent trickle"),
+        )
     if dev >= 4 and mean >= 2.0:
-        return det("overuse", 0.5 + 0.4 * min((dev - 4) / 8, 1), mean - baseline_median,
-                   ("baseline_deviation", "usage far above this hour's normal"))
+        return det(
+            "overuse",
+            0.5 + 0.4 * min((dev - 4) / 8, 1),
+            mean - baseline_median,
+            ("baseline_deviation", "usage far above this hour's normal"),
+        )
     return None
 
 
@@ -177,6 +234,7 @@ class ModelStore:
         import joblib
 
         with self._tlock:
+
             def _load(name: str) -> Any:
                 p = self.model_dir / f"{name}.joblib"
                 if not p.is_file():
@@ -188,7 +246,9 @@ class ModelStore:
                     return None
 
             self.iso, self.clf, self.forecaster = (
-                _load("isolation_forest"), _load("classifier"), _load("forecaster"),
+                _load("isolation_forest"),
+                _load("classifier"),
+                _load("forecaster"),
             )
             names = _load("feature_names")
             self.feature_names = list(names) if names else list(FEATURE_NAMES)
@@ -203,8 +263,12 @@ class ModelStore:
             self.version = self._compute_version()
             self.forecaster_version = self._forecaster_version()
             self._loaded = True
-            log.info("models_loaded", version=self.version, ml_ready=self.ml_ready,
-                     forecaster=self.forecaster is not None)
+            log.info(
+                "models_loaded",
+                version=self.version,
+                ml_ready=self.ml_ready,
+                forecaster=self.forecaster is not None,
+            )
 
     def _compute_version(self) -> str:
         files = [self.model_dir / f"{n}.joblib" for n in ("isolation_forest", "classifier")]
@@ -215,18 +279,20 @@ class ModelStore:
         for p in present:
             h.update(p.read_bytes())
         meta = self.metadata.get("classifier") or self.metadata.get("isolation_forest") or {}
-        trained = meta.get("trained_at") or datetime.fromtimestamp(
-            present[0].stat().st_mtime, UTC
-        ).isoformat()
+        trained = (
+            meta.get("trained_at")
+            or datetime.fromtimestamp(present[0].stat().st_mtime, UTC).isoformat()
+        )
         return f"{trained}+{h.hexdigest()[:8]}"
 
     def _forecaster_version(self) -> str:
         p = self.model_dir / "forecaster.joblib"
         if self.forecaster is None or not p.is_file():
             return "baseline-median"
-        trained = self.metadata.get("forecaster", {}).get("trained_at") or datetime.fromtimestamp(
-            p.stat().st_mtime, UTC
-        ).isoformat()
+        trained = (
+            self.metadata.get("forecaster", {}).get("trained_at")
+            or datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat()
+        )
         return f"{trained}+{hashlib.sha256(p.read_bytes()).hexdigest()[:8]}"
 
     def _lock(self) -> asyncio.Lock:
@@ -315,8 +381,14 @@ async def classify_anomaly_ml(
             atype = rules.anomaly_type  # ML sees "leak"; rules know the sub-type
     shap_vals = await asyncio.to_thread(_shap_top3, store, x, ci) if label != "normal" else None
     return Detection(
-        atype, conf, round(max(estimate_loss(atype, features, baseline_median), 0.0), 3), "ml",
-        rules.reasons if rules else [], shap_vals, probs, iso_score,
+        atype,
+        conf,
+        round(max(estimate_loss(atype, features, baseline_median), 0.0), 3),
+        "ml",
+        rules.reasons if rules else [],
+        shap_vals,
+        probs,
+        iso_score,
     )
 
 
@@ -368,7 +440,9 @@ async def run_detection(
     slots = baseline.slots if baseline else None
     features = extract_features(readings, slots, now)
     stats = slot_stats(slots, now)
-    det = await classify_anomaly_ml(features, store, baseline_median=stats["median"] if stats else 0.0)
+    det = await classify_anomaly_ml(
+        features, store, baseline_median=stats["median"] if stats else 0.0
+    )
     repo = AnomalyRepository(session)
     if det is None:
         resolved = await repo.open_for_flat(flat.id)
@@ -383,17 +457,22 @@ async def run_detection(
         det.confidence, det.est_loss_lpm, duration, bool(features["is_night"]), det.anomaly_type
     )
     fields = dict(
-        confidence=det.confidence, severity=severity, features=features,
-        shap_values=det.shap_values, explanation=build_explanation(det, features),
+        confidence=det.confidence,
+        severity=severity,
+        features=features,
+        shap_values=det.shap_values,
+        explanation=build_explanation(det, features),
         baseline_version=baseline.version if baseline else None,
-        window_start=now - WINDOW, window_end=now, est_loss_lpm=det.est_loss_lpm,
+        window_start=now - WINDOW,
+        window_end=now,
+        est_loss_lpm=det.est_loss_lpm,
     )
     if existing:
         for k, v in fields.items():
             setattr(existing, k, v)
         await repo.flush()
         return DetectionOutcome(existing, False, [], features, det)
-    anomaly = await repo.add(Anomaly(flat_id=flat.id, detected_at=now, anomaly_type=det.anomaly_type, **fields))
+    anomaly = await repo.add(
+        Anomaly(flat_id=flat.id, detected_at=now, anomaly_type=det.anomaly_type, **fields)
+    )
     return DetectionOutcome(anomaly, True, [], features, det)
-
-

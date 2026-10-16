@@ -1,4 +1,5 @@
 """Human-readable alert messages. Template-based by default; LLM backends plug in via Explainer."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol

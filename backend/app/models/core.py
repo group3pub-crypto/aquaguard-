@@ -24,7 +24,9 @@ class Society(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
     slug: Mapped[str] = mapped_column(sa.String(100), nullable=False, unique=True)
     address: Mapped[str | None] = mapped_column(sa.String(500))
-    total_flats: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0, server_default="0")
+    total_flats: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
 
 
 class Flat(TimestampMixin, Base):
@@ -41,7 +43,9 @@ class Flat(TimestampMixin, Base):
     )
     unit_number: Mapped[str] = mapped_column(sa.String(50), nullable=False)
     floor: Mapped[int | None] = mapped_column(sa.Integer)
-    residents: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1, server_default="1")
+    residents: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=1, server_default="1"
+    )
     sensor_id: Mapped[str] = mapped_column(sa.String(100), nullable=False, unique=True)
     valve_state: Mapped[str] = mapped_column(
         sa.String(20), nullable=False, default="unknown", server_default="unknown"
@@ -63,7 +67,9 @@ class User(Base):
         sa.String(20), nullable=False, default="resident", server_default="resident"
     )
     telegram_id: Mapped[int | None] = mapped_column(sa.BigInteger, unique=True)
-    flat_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("flats.id", ondelete="SET NULL"))
+    flat_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("flats.id", ondelete="SET NULL")
+    )
     society_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("societies.id", ondelete="SET NULL")
     )

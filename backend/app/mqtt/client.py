@@ -1,4 +1,5 @@
 """aiomqtt wrapper: reconnecting subscriber + publisher."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,8 +36,11 @@ class MqttService:
         while True:
             try:
                 async with aiomqtt.Client(
-                    hostname=s.mqtt_host, port=s.mqtt_port, username=s.mqtt_username,
-                    password=s.mqtt_password, identifier="aquaguard-backend",
+                    hostname=s.mqtt_host,
+                    port=s.mqtt_port,
+                    username=s.mqtt_username,
+                    password=s.mqtt_password,
+                    identifier="aquaguard-backend",
                 ) as client:
                     self._client, self.connected, backoff = client, True, 1.0
                     for topic in SUBSCRIPTIONS:

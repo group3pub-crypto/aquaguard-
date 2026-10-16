@@ -1,4 +1,5 @@
-"""Alert lifecycle: creation, de-duplication, escalation tiers, auto shut-off, manual transitions."""
+"""Alert lifecycle: dedupe, escalation tiers, guarded auto shut-off, manual transitions."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -9,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Alert, Anomaly, Flat
 from app.repositories import (
-    AlertRepository, AnomalyRepository, AuditRepository, FlatRepository, ReadingRepository,
+    AlertRepository,
+    AnomalyRepository,
+    AuditRepository,
+    FlatRepository,
+    ReadingRepository,
 )
 from app.runtime import Runtime
 from app.schemas.domain import AlertOut
@@ -38,7 +43,7 @@ TRANSITIONS: dict[str, set[str]] = {
 }
 
 
-class InvalidTransition(Exception):  # noqa: N818
+class InvalidTransition(Exception):
     def __init__(self, action: str, state: str) -> None:
         super().__init__(f"cannot {action} an alert in state '{state}'")
 
@@ -76,15 +81,30 @@ def auto_shutoff_block_reason(
     return None
 
 
-async def _emit(session: AsyncSession, rt: Runtime, flat: Flat, alert: Alert, action: str,
-                actor: str, details: dict | None = None) -> None:
+async def _emit(
+    session: AsyncSession,
+    rt: Runtime,
+    flat: Flat,
+    alert: Alert,
+    action: str,
+    actor: str,
+    details: dict | None = None,
+) -> None:
     await AuditRepository(session).record(
-        entity_type="alert", entity_id=alert.id, action=action, actor=actor,
+        entity_type="alert",
+        entity_id=alert.id,
+        action=action,
+        actor=actor,
         details={"state": alert.state, "tier": alert.tier, **(details or {})},
-        flat_id=flat.id, society_id=flat.society_id,
+        flat_id=flat.id,
+        society_id=flat.society_id,
     )
     await rt.ws.broadcast(
-        {"type": "alert", "event": action, "alert": AlertOut.model_validate(alert).model_dump(mode="json")},
+        {
+            "type": "alert",
+            "event": action,
+            "alert": AlertOut.model_validate(alert).model_dump(mode="json"),
+        },
         [str(flat.id), str(flat.society_id)],
     )
 
@@ -105,18 +125,29 @@ async def process_anomaly(
     if await alerts.find_overridden(flat.id, anomaly.anomaly_type, now):
         return None  # inside 24h override cooldown
     message = rt.explainer.message(
-        {"unit": flat.unit_number, "anomaly_type": anomaly.anomaly_type,
-         "est_loss_lpm": anomaly.est_loss_lpm, "tier": tier}
+        {
+            "unit": flat.unit_number,
+            "anomaly_type": anomaly.anomaly_type,
+            "est_loss_lpm": anomaly.est_loss_lpm,
+            "tier": tier,
+        }
     )
     alert = await alerts.add(
         Alert(
-            flat_id=flat.id, anomaly_id=anomaly.id, state=STATE_BY_TIER[tier], tier=tier,
-            severity_score=anomaly.severity, message=message, message_source=rt.explainer.source,
+            flat_id=flat.id,
+            anomaly_id=anomaly.id,
+            state=STATE_BY_TIER[tier],
+            tier=tier,
+            severity_score=anomaly.severity,
+            message=message,
+            message_source=rt.explainer.source,
             escalated_at=[],
         )
     )
     alert.created_at = now  # time-travel friendly (and exact for replayed data)
-    await _emit(session, rt, flat, alert, "created", "system", {"anomaly_type": anomaly.anomaly_type})
+    await _emit(
+        session, rt, flat, alert, "created", "system", {"anomaly_type": anomaly.anomaly_type}
+    )
     return alert
 
 
@@ -128,7 +159,11 @@ async def _active_use(session: AsyncSession, flat: Flat, now: datetime) -> bool 
 
 
 async def escalate_alert(
-    session: AsyncSession, rt: Runtime, alert: Alert, now: datetime, active_use: bool | None = _UNSET,
+    session: AsyncSession,
+    rt: Runtime,
+    alert: Alert,
+    now: datetime,
+    active_use: bool | None = _UNSET,
 ) -> bool:
     """Advance one alert if its delay elapsed. Returns True if its state changed."""
     flat = await FlatRepository(session).get(alert.flat_id)
@@ -156,8 +191,15 @@ async def escalate_alert(
             log.info("auto_shutoff_blocked", alert=str(alert.id), reason=reason)
             return False
         cmd = await valve_control.send_valve_command(
-            session, rt, flat, "close", source="auto", issued_by="system", alert_id=alert.id,
-            reason="auto shut-off", now=now,
+            session,
+            rt,
+            flat,
+            "close",
+            source="auto",
+            issued_by="system",
+            alert_id=alert.id,
+            reason="auto shut-off",
+            now=now,
         )
         extra = {"valve_command": str(cmd.id), "valve_status": cmd.status}
     else:
@@ -165,10 +207,16 @@ async def escalate_alert(
     alert.tier, alert.state = new_tier, STATE_BY_TIER[new_tier]
     alert.escalated_at = [*(alert.escalated_at or []), now.isoformat()]
     alert.message = rt.explainer.message(
-        {"unit": flat.unit_number, "anomaly_type": anomaly.anomaly_type,
-         "est_loss_lpm": anomaly.est_loss_lpm, "tier": new_tier}
+        {
+            "unit": flat.unit_number,
+            "anomaly_type": anomaly.anomaly_type,
+            "est_loss_lpm": anomaly.est_loss_lpm,
+            "tier": new_tier,
+        }
     )
-    await _emit(session, rt, flat, alert, "auto_shutoff" if new_tier == 4 else "escalated", "system", extra)
+    await _emit(
+        session, rt, flat, alert, "auto_shutoff" if new_tier == 4 else "escalated", "system", extra
+    )
     return True
 
 
@@ -180,7 +228,9 @@ async def run_escalations(session: AsyncSession, rt: Runtime, now: datetime | No
     return n
 
 
-async def auto_resolve(session: AsyncSession, rt: Runtime, flat: Flat, anomaly: Anomaly, now: datetime) -> None:
+async def auto_resolve(
+    session: AsyncSession, rt: Runtime, flat: Flat, anomaly: Anomaly, now: datetime
+) -> None:
     """Detector saw normal flow again: close low-tier alerts; tickets/shut-offs need a human."""
     for alert in await AlertRepository(session).for_anomaly(anomaly.id):
         if alert.state in ("nudge", "alert"):
@@ -189,8 +239,15 @@ async def auto_resolve(session: AsyncSession, rt: Runtime, flat: Flat, anomaly: 
 
 
 async def apply_action(
-    session: AsyncSession, rt: Runtime, alert: Alert, action: str, actor: str, *,
-    now: datetime | None = None, minutes: int | None = None, reason: str | None = None,
+    session: AsyncSession,
+    rt: Runtime,
+    alert: Alert,
+    action: str,
+    actor: str,
+    *,
+    now: datetime | None = None,
+    minutes: int | None = None,
+    reason: str | None = None,
 ) -> Alert:
     """Manual transition (acknowledge | snooze | override | resolve) with audit + broadcast."""
     now = now or datetime.now(UTC)
@@ -213,8 +270,15 @@ async def apply_action(
             anomaly.resolved_at = now
         if previous == "auto_shutoff":  # operator says the shut-off was wrong: restore water
             cmd = await valve_control.send_valve_command(
-                session, rt, flat, "open", source="manual_override", issued_by=actor,
-                alert_id=alert.id, reason=reason, now=now,
+                session,
+                rt,
+                flat,
+                "open",
+                source="manual_override",
+                issued_by=actor,
+                alert_id=alert.id,
+                reason=reason,
+                now=now,
             )
             details["valve_command"] = str(cmd.id)
     else:

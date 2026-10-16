@@ -1,4 +1,5 @@
 """Declarative base and portable column types (PostgreSQL in prod, SQLite in tests)."""
+
 from __future__ import annotations
 
 import uuid
@@ -55,9 +56,7 @@ def uuid_pk() -> Mapped[uuid.UUID]:
 
 
 def ts_col(*, nullable: bool = True, default: bool = False, **kw):
-    return mapped_column(
-        UTCDateTime, nullable=nullable, default=utcnow if default else None, **kw
-    )
+    return mapped_column(UTCDateTime, nullable=nullable, default=utcnow if default else None, **kw)
 
 
 class TimestampMixin:
