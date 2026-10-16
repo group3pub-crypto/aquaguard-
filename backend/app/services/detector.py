@@ -82,7 +82,9 @@ def extract_features(
     hist = bin_to_minutes(
         np.asarray([p[0] for p in pts]), np.asarray([p[1] for p in pts]), end, HISTORY
     )
-    bin_ends = (local(datetime.fromtimestamp(end - 60 * j, UTC)) for j in range(HISTORY - 1, -1, -1))
+    bin_ends = (
+        local(datetime.fromtimestamp(end - 60 * j, UTC)) for j in range(HISTORY - 1, -1, -1)
+    )
     slots = np.asarray([slot_index(ld.weekday(), ld.hour) for ld in bin_ends])
     return extract_window_features_one(
         hist, slots, d.hour, d.weekday(), SlotBaseline.from_slots(baseline_slots)
@@ -316,10 +318,10 @@ class ModelStore:
                 else:
                     self._sklearn_warning(det_meta, "detector", warnings)
             if iso is None or clf is None:
-                status.setdefault("detector", "unavailable:rules_fallback")
-                if status.get("detector", "").startswith("unavailable"):
-                    log.warning("detector_models_unavailable_using_rules", status=dict(status))
                 iso = clf = None
+                if "detector" not in status:
+                    status["detector"] = "unavailable:rules_fallback"
+                    log.warning("detector_models_unavailable_using_rules", status=dict(status))
             else:
                 status["detector"] = "ok"
 
@@ -334,8 +336,6 @@ class ModelStore:
                 reason = status.get("forecaster", "missing")
                 status["forecaster"] = f"baseline_fallback:{reason}"
                 log.warning("forecaster_unavailable_using_baseline", reason=reason)
-            elif status["forecaster"].startswith("ok"):
-                status["forecaster"] = status["forecaster"]
 
             self.iso, self.clf, self.forecaster = iso, clf, forecaster
             self.feature_names = list(FEATURE_NAMES)
