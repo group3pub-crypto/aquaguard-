@@ -23,10 +23,8 @@ def _pg() -> bool:
 
 
 def _uuid_pk() -> sa.Column:
-    return sa.Column(
-        "id", sa.Uuid(), primary_key=True,
-        server_default=sa.text("gen_random_uuid()") if _pg() else None,
-    )
+    # ids are generated client-side (uuid4) by the ORM; no server default so models == schema
+    return sa.Column("id", sa.Uuid(), primary_key=True)
 
 
 def _in(col: str, values: tuple[str, ...]) -> str:
@@ -67,9 +65,9 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("sensor_id", name="uq_flats_sensor_id"),
         sa.UniqueConstraint("society_id", "unit_number", name="uq_flats_society_unit"),
-        sa.CheckConstraint(_in("valve_state", ("open", "closed", "unknown")), name="ck_flats_valve_state"),
+        sa.CheckConstraint(_in("valve_state", ("open", "closed", "unknown")), name="valve_state"),
         sa.CheckConstraint(
-            _in("baseline_status", ("learning", "ready", "stale")), name="ck_flats_baseline_status"
+            _in("baseline_status", ("learning", "ready", "stale")), name="baseline_status"
         ),
     )
     op.create_index("ix_flats_society_id", "flats", ["society_id"])
@@ -93,7 +91,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("username", name="uq_users_username"),
         sa.UniqueConstraint("telegram_id", name="uq_users_telegram_id"),
-        sa.CheckConstraint(_in("role", ("resident", "admin", "maintenance")), name="ck_users_role"),
+        sa.CheckConstraint(_in("role", ("resident", "admin", "maintenance")), name="role"),
     )
 
     op.create_table(
@@ -158,7 +156,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             _in("anomaly_type", ("leak", "burst", "overuse", "running_toilet", "dripping_tap", "unknown")),
-            name="ck_anomalies_anomaly_type",
+            name="anomaly_type",
         ),
     )
     op.create_index("ix_anomalies_flat_detected", "anomalies", ["flat_id", "detected_at"])
@@ -192,8 +190,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["anomaly_id"], ["anomalies.id"], name="fk_alerts_anomaly_id_anomalies", ondelete="CASCADE"
         ),
-        sa.CheckConstraint(_in("state", states), name="ck_alerts_state"),
-        sa.CheckConstraint("tier BETWEEN 1 AND 4", name="ck_alerts_tier"),
+        sa.CheckConstraint(_in("state", states), name="state"),
+        sa.CheckConstraint("tier BETWEEN 1 AND 4", name="tier"),
     )
     op.create_index("ix_alerts_flat_id", "alerts", ["flat_id"])
     op.create_index("ix_alerts_anomaly_id", "alerts", ["anomaly_id"])
@@ -220,13 +218,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["alert_id"], ["alerts.id"], name="fk_valve_commands_alert_id_alerts", ondelete="SET NULL"
         ),
-        sa.CheckConstraint("command IN ('open', 'close')", name="ck_valve_commands_command"),
+        sa.CheckConstraint("command IN ('open', 'close')", name="command"),
         sa.CheckConstraint(
             _in("source", ("auto", "manual_dashboard", "manual_bot", "manual_override")),
-            name="ck_valve_commands_source",
+            name="source",
         ),
         sa.CheckConstraint(
-            _in("status", ("pending", "confirmed", "failed", "timeout")), name="ck_valve_commands_status"
+            _in("status", ("pending", "confirmed", "failed", "timeout")), name="status"
         ),
     )
     op.create_index("ix_valve_commands_flat_id", "valve_commands", ["flat_id"])
@@ -281,7 +279,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["flat_id"], ["flats.id"], name="fk_sensor_health_flat_id_flats", ondelete="CASCADE"
         ),
-        sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="ck_sensor_health_status"),
+        sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="status"),
     )
 
     if _pg():
@@ -295,7 +293,7 @@ def upgrade() -> None:
             $$ LANGUAGE plpgsql
             """
         )
-        for table in ("societies", "flats", "alerts"):
+        for table in ("societies", "flats", "alerts", "sensor_health"):
             op.execute(
                 f"CREATE TRIGGER trg_{table}_updated_at BEFORE UPDATE ON {table} "
                 "FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
@@ -304,7 +302,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     if _pg():
-        for table in ("societies", "flats", "alerts"):
+        for table in ("societies", "flats", "alerts", "sensor_health"):
             op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_updated_at ON {table}")
         op.execute("DROP FUNCTION IF EXISTS set_updated_at()")
     for table in (
