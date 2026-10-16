@@ -36,4 +36,4 @@ The Docker image runs `alembic upgrade head` and then uvicorn (`docker-entrypoin
 - Auth: JWT (HS256). Roles are read from the DB on each request, so role changes apply at once.
   Self-registration always creates `resident`. WebSocket: `/api/v1/ws/live?token=<JWT>`.
 - Hour-of-week slots, "night" and forecast features use `TIMEZONE` (default UTC).
-- Forecast target is hourly consumption in litres (`vol` summed per hour).
+- Forecast target is the mean flow rate in L/min per hour (not litres per hour); litres = L/min x 60.

@@ -4,6 +4,9 @@ Everything here is SIMULATED. Real sensors (YF-S201 pulse counters, noisy plumbi
 households) will look different; see the generated reports for the caveats.
 
 Usage: python -m ml.scripts.generate_data --flats 12 --days 30 --seed 42 --out ml/data
+
+The trainers can read this output with ``--data-dir ml/data`` (otherwise they generate the same
+data in memory from --seed/--flats/--days, so this step is optional).
 """
 
 from __future__ import annotations
@@ -194,6 +197,23 @@ def save_dataset(df: pd.DataFrame, out: Path) -> list[Path]:
             g.to_csv(p, index=False)
         paths.append(p)
     return paths
+
+
+def load_dataset(data_dir: Path) -> pd.DataFrame:
+    """Read what ``save_dataset`` wrote (parquet or csv per flat) back into the training frame."""
+    files = sorted([*data_dir.glob("*.parquet"), *data_dir.glob("*.csv")])
+    if not files:
+        raise FileNotFoundError(f"no .parquet/.csv files in {data_dir}")
+    parts = [
+        pd.read_parquet(f) if f.suffix == ".parquet" else pd.read_csv(f, parse_dates=["ts"])
+        for f in files
+    ]
+    df = pd.concat(parts, ignore_index=True)
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    df["flow"] = df["flow"].astype("float32")
+    df["fault"] = pd.Categorical(df["fault"].astype(str), categories=[NO_FAULT, *FAULT_TYPES])
+    df["flat_id"] = df["flat_id"].astype(str)
+    return df.sort_values(["flat_id", "ts"], ignore_index=True)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -2,10 +2,15 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 ENVIRONMENT=production
 
+# Build context is the REPO ROOT (docker build -f backend/Dockerfile .) so the shared
+# train/serve feature package in libs/ can be installed.
+COPY libs/aquaguard_features /srv/libs/aquaguard_features
+RUN pip install /srv/libs/aquaguard_features
+
 WORKDIR /srv/backend
-COPY pyproject.toml ./
+COPY backend/pyproject.toml ./
 RUN mkdir app && touch app/__init__.py && pip install . && rm -rf app
-COPY . .
+COPY backend/ .
 RUN pip install --no-deps . && chmod +x docker-entrypoint.sh \
     && useradd --system --uid 10001 --home /srv/backend aquaguard \
     && chown -R aquaguard /srv/backend

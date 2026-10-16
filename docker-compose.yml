@@ -69,6 +69,8 @@ services:
       DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-}
       DEMO_RESIDENT_PASSWORD: ${DEMO_RESIDENT_PASSWORD:-}
       MODEL_DIR: /app/ml/models
+      # the accelerated demo simulator (--speed 60) stamps readings ahead of wall clock
+      MQTT_MAX_FUTURE_SKEW_S: ${MQTT_MAX_FUTURE_SKEW_S:-300}
       BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
       WATSONX_API_KEY: ${WATSONX_API_KEY:-}
       WATSONX_PROJECT_ID: ${WATSONX_PROJECT_ID:-}
@@ -113,7 +115,7 @@ services:
     build:
       context: .
       dockerfile: edge/Dockerfile
-    command: ["python", "-m", "edge.simulator", "--society", "demo", "--flats", "6", "--speed", "60", "--broker", "mosquitto:1883"]
+    command: ["python", "-m", "edge.simulator", "--society", "green-valley", "--units", "101,102,201,202,301,302", "--speed", "60", "--broker", "mosquitto:1883"]
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}

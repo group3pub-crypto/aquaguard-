@@ -59,7 +59,10 @@ def main(argv: list[str] | None = None) -> None:
         f"FPR(normal)={m['false_positive_rate_normal']}"
     )
     print(f"  per-class F1: { {c: round(v['f1'], 3) for c, v in m['per_class'].items()} }")
-    print(f"  time-to-detect: {m['time_to_detect_min']}")
+    print(
+        "  onset->first non-normal window (offline, any class, stride-quantized): "
+        f"{m['onset_to_first_flag_min']}"
+    )
     if a.shap:
         try:
             top = shap_importance(r["clf"], r["test"][FEATURE_NAMES])

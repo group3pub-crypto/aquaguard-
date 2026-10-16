@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 MAX_FLOW_LPM = 500.0
 MAX_PAYLOAD_BYTES = 2048
@@ -27,8 +27,11 @@ class FlowPayload(BaseModel):
 
     @field_validator("ts")
     @classmethod
-    def _not_future(cls, v: float) -> float:
-        if v > time.time() + MAX_FUTURE_SKEW_S:
+    def _not_future(cls, v: float, info: ValidationInfo) -> float:
+        # the allowed skew comes from Settings.mqtt_max_future_skew_s (validation context); the
+        # accelerated demo simulator runs ahead of wall clock and needs a larger value
+        skew = (info.context or {}).get("max_future_skew_s", MAX_FUTURE_SKEW_S)
+        if v > time.time() + skew:
             raise ValueError("timestamp is in the future")
         return v
 

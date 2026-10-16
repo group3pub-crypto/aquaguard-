@@ -61,15 +61,4 @@ export function WithAuth({ role, children, username }: { role: Role | null; chil
   return <AuthContext.Provider value={authValue(role, username)}>{children}</AuthContext.Provider>;
 }
 
-export const sampleAlert = {
-  id: 7,
-  flat_id: 3,
-  anomaly_id: 1,
-  state: 'active',
-  tier: 1,
-  severity_score: 0.82,
-  message: 'Possible burst pipe',
-  message_source: 'template',
-  created_at: '2026-01-01T10:00:00Z',
-  updated_at: '2026-01-01T10:00:00Z',
-};
+export { alert as sampleAlert } from './fixtures';

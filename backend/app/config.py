@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     background_tasks_enabled: bool = True
+    # readings stamped further in the future than this are rejected (clock-skew guard). The
+    # accelerated demo simulator (--speed > 1) runs ahead of wall clock: raise it for demos.
+    mqtt_max_future_skew_s: float = Field(300.0, ge=0)
+    mqtt_client_id: str = "aquaguard-backend"
 
     # ml
     model_dir: Path = REPO_ROOT / "ml" / "models"

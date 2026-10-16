@@ -81,9 +81,10 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
         log.exception("ingest_dispatch_failed")
 
 
-def _parse(model: type[M], payload: bytes) -> M:
+def _parse(model: type[M], payload: bytes, max_future_skew_s: float | None = None) -> M:
     try:
-        return model.model_validate_json(payload)
+        ctx = {"max_future_skew_s": max_future_skew_s} if max_future_skew_s is not None else None
+        return model.model_validate_json(payload, context=ctx)
     except ValidationError as exc:
         first = exc.errors()[0]
         raise IngestError(f"invalid_payload:{'.'.join(map(str, first['loc']))}") from None
@@ -97,7 +98,7 @@ async def _resolve_flat(session, parsed: ParsedTopic) -> Flat:
 
 
 async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
-    data = _parse(FlowPayload, payload)
+    data = _parse(FlowPayload, payload, rt.settings.mqtt_max_future_skew_s)
     ts = datetime.fromtimestamp(data.ts, UTC)
     now = datetime.now(UTC)
     async with rt.db.session() as session:

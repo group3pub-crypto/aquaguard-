@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "snapshot:openapi": "cd ../backend && ENVIRONMENT=test python -c \"from app.main import app_factory; import json; print(json.dumps(app_factory().openapi()))\" > ../dashboard/src/lib/openapi.snapshot.json"
+    "snapshot:openapi": "cd ../backend && ENVIRONMENT=test python -c \"from app.main import app_factory; import json; print(json.dumps(app_factory().openapi()))\" | grep \"^{\" > ../dashboard/src/lib/openapi.snapshot.json"
   },
   "dependencies": {
     "next": "16.4.0",

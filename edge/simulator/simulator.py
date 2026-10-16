@@ -7,6 +7,7 @@ whole behaviour is unit-testable without a broker; ``run_mqtt`` only moves bytes
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -183,13 +184,14 @@ class Simulator:
         unit_base: int = 101,
         flat_ids: dict[str, str] | None = None,
         real_now: float | None = None,
+        units: list[str] | None = None,
     ):
         self.society, self.seed = society, seed
         real_now = time.monotonic() if real_now is None else real_now
         start = (time.time() if start_epoch is None else start_epoch) // 60 * 60
         self.clock = SimClock(start, min(SPEED_MAX, max(SPEED_MIN, speed)), real_now)
         self.next_minute = int(start)
-        profiles = make_profiles(flats, seed, unit_base, flat_ids)
+        profiles = make_profiles(flats, seed, unit_base, flat_ids, units)
         self.flats = {
             p.unit: FlatSimulator(p, society, seed, i, start) for i, p in enumerate(profiles)
         }
@@ -328,4 +330,111 @@ async def run_mqtt(
             except TimeoutError:
                 pass
             backoff = min(backoff * 2, 30.0)
+    log.info("stopped")
+
+
+# ---------------------------------------------------------------- per-device credentials
+def device_username(society: str, unit: str) -> str:
+    return f"{society}/{unit}"
+
+
+def device_password(secret: str, society: str, unit: str) -> str:
+    """Same derivation as infra/mosquitto/entrypoint.sh: first 32 hex of sha256(secret:user)."""
+    return hashlib.sha256(f"{secret}:{device_username(society, unit)}".encode()).hexdigest()[:32]
+
+
+async def run_mqtt_per_device(
+    sim: Simulator,
+    host: str,
+    port: int,
+    stop: asyncio.Event,
+    device_secret: str,
+    control_username: str | None = None,
+    control_password: str | None = None,
+    tick_s: float = 0.2,
+) -> None:
+    """One broker connection per simulated flat, each with its own broker account (ACL-limited
+    to that flat's topics), plus one control connection for fault/speed messages."""
+    import aiomqtt
+
+    queues: dict[str, asyncio.Queue[Outgoing]] = {u: asyncio.Queue() for u in sim.flats}
+
+    async def reconnecting(name: str, body) -> None:
+        backoff = 1.0
+        while not stop.is_set():
+            try:
+                await body()
+            except aiomqtt.MqttError as e:
+                if stop.is_set():
+                    return
+                log.warning("%s: mqtt error (%s); reconnecting in %.0fs", name, e, backoff)
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=backoff)
+                except TimeoutError:
+                    pass
+                backoff = min(backoff * 2, 30.0)
+
+    async def device(unit: str) -> None:
+        async def body() -> None:
+            async with aiomqtt.Client(
+                hostname=host,
+                port=port,
+                username=device_username(sim.society, unit),
+                password=device_password(device_secret, sim.society, unit),
+                identifier=f"aquaguard-edge-{sim.society}-{unit}",
+                keepalive=30,
+            ) as client:
+                await client.subscribe(f"aquaguard/{sim.society}/{unit}/valve/cmd", qos=1)
+
+                async def send() -> None:
+                    while True:
+                        m = await queues[unit].get()
+                        await client.publish(m.topic, m.payload, qos=m.qos, retain=m.retain)
+
+                async def recv() -> None:
+                    async for msg in client.messages:
+                        for m in sim.handle_message(str(msg.topic), bytes(msg.payload)):
+                            await client.publish(m.topic, m.payload, qos=m.qos, retain=m.retain)
+
+                tasks = [asyncio.create_task(send()), asyncio.create_task(recv())]
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for p in pending:
+                    p.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                for d in done:
+                    d.result()
+
+        await reconnecting(f"device {unit}", body)
+
+    async def control() -> None:
+        async def body() -> None:
+            async with aiomqtt.Client(
+                hostname=host,
+                port=port,
+                username=control_username,
+                password=control_password,
+                identifier=f"aquaguard-edge-{sim.society}-control",
+                keepalive=30,
+            ) as client:
+                await client.subscribe(CONTROL_FAULT_TOPIC, qos=1)
+                await client.subscribe(CONTROL_SPEED_TOPIC, qos=1)
+                async for msg in client.messages:
+                    sim.handle_message(str(msg.topic), bytes(msg.payload))
+
+        await reconnecting("control", body)
+
+    async def ticker() -> None:
+        while True:
+            for m in sim.due(time.monotonic()):
+                queues[m.topic.split("/")[2]].put_nowait(m)
+            await asyncio.sleep(tick_s)
+
+    tasks = [asyncio.create_task(device(u)) for u in sim.flats]
+    tasks.append(asyncio.create_task(ticker()))
+    if control_username:
+        tasks.append(asyncio.create_task(control()))
+    await stop.wait()
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
     log.info("stopped")

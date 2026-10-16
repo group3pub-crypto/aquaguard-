@@ -7,7 +7,7 @@ class MockWS {
   onopen: (() => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e?: { code: number }) => void) | null = null;
   closed = false;
   constructor(public url: string) {
     MockWS.instances.push(this);
@@ -15,8 +15,8 @@ class MockWS {
   close() {
     this.closed = true;
   }
-  fail() {
-    this.onclose?.();
+  fail(code?: number) {
+    this.onclose?.(code === undefined ? undefined : { code });
   }
 }
 
@@ -38,6 +38,29 @@ describe('backoffDelay', () => {
 });
 
 describe('useWebSocket', () => {
+  it('on close code 4401 does NOT retry with the stale token and signals unauthorized', () => {
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useWebSocket({ url: 'ws://x', onMessage: vi.fn(), onUnauthorized }));
+    act(() => MockWS.instances[0]?.fail(4401));
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toBe('disconnected');
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it('still retries on ordinary closes (1006)', () => {
+    const onUnauthorized = vi.fn();
+    renderHook(() => useWebSocket({ url: 'ws://x', onMessage: vi.fn(), onUnauthorized }));
+    act(() => MockWS.instances[0]?.fail(1006));
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockWS.instances).toHaveLength(2);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
   it('reconnects on the backoff schedule then reports disconnected', () => {
     const { result } = renderHook(() => useWebSocket({ url: 'ws://x', onMessage: vi.fn(), maxRetries: 3 }));
     expect(MockWS.instances).toHaveLength(1);

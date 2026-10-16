@@ -23,13 +23,17 @@ def make_profiles(
     seed: int = 42,
     unit_base: int = 101,
     flat_ids: dict[str, str] | None = None,
+    units: list[str] | None = None,
 ) -> list[Profile]:
-    """``flat_ids`` maps unit -> backend flat_id (optional)."""
+    """``flat_ids`` maps unit -> backend flat_id (optional). ``units`` overrides the
+    ``unit_base``-based numbering (n is then ``len(units)``), e.g. to match a seeded society."""
+    if units:
+        n = len(units)
     rng = np.random.default_rng([seed, 1])
     flat_ids = flat_ids or {}
     out = []
     for i in range(n):
-        unit = str(unit_base + i)
+        unit = units[i] if units else str(unit_base + i)
         out.append(
             Profile(
                 unit=unit,

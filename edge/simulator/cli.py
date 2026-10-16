@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 
-from edge.simulator.simulator import Simulator, run_mqtt
+from edge.simulator.simulator import Simulator, run_mqtt, run_mqtt_per_device
 
 
 def parse_broker(s: str) -> tuple[str, int]:
@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--speed", type=float, default=1.0, help="1=realtime, 60=1 sim hour/real min")
     ap.add_argument("--broker", default="localhost:1883")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument(
+        "--units",
+        default="",
+        help="comma separated unit numbers (overrides --flats/--unit-base), "
+        "e.g. 101,102,201,202,301,302 for the seeded demo society 'green-valley'",
+    )
     ap.add_argument("--unit-base", type=int, default=101, help="first flat unit number")
     ap.add_argument(
         "--flat-map",
@@ -32,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--username", default=os.environ.get("MQTT_USERNAME"))
     ap.add_argument("--password", default=os.environ.get("MQTT_PASSWORD"))
+    ap.add_argument(
+        "--device-secret",
+        default=os.environ.get("MQTT_DEVICE_SECRET"),
+        help="per-device broker accounts: every flat connects as <society>/<unit> with a password "
+        "derived from this secret; --username/--password then only serve the control topics",
+    )
     ap.add_argument("--log-level", default="INFO")
     return ap
 
@@ -40,7 +52,13 @@ async def amain(args: argparse.Namespace) -> None:
     host, port = parse_broker(args.broker)
     flat_ids = json.loads(args.flat_map) if args.flat_map else None
     sim = Simulator(
-        args.society, args.flats, args.speed, args.seed, unit_base=args.unit_base, flat_ids=flat_ids
+        args.society,
+        args.flats,
+        args.speed,
+        args.seed,
+        unit_base=args.unit_base,
+        flat_ids=flat_ids,
+        units=[u.strip() for u in args.units.split(",") if u.strip()] or None,
     )
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -49,7 +67,12 @@ async def amain(args: argparse.Namespace) -> None:
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:  # pragma: no cover (Windows)
             pass
-    await run_mqtt(sim, host, port, stop, args.username, args.password)
+    if args.device_secret:
+        await run_mqtt_per_device(
+            sim, host, port, stop, args.device_secret, args.username, args.password
+        )
+    else:
+        await run_mqtt(sim, host, port, stop, args.username, args.password)
 
 
 def main(argv: list[str] | None = None) -> int:

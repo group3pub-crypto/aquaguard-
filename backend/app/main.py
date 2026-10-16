@@ -58,7 +58,11 @@ def create_app(settings: Settings | None = None, db: Database | None = None) -> 
         if settings.background_tasks_enabled:
             tasks.append(asyncio.create_task(_maintenance_loop(rt)))
             if settings.mqtt_enabled:
-                mqtt = MqttService(settings, lambda t, p: ingest.handle_message(rt, t, p))
+                mqtt = MqttService(
+                    settings,
+                    lambda t, p: ingest.handle_message(rt, t, p),
+                    client_id=settings.mqtt_client_id,
+                )
                 rt.publisher = mqtt
                 tasks.append(asyncio.create_task(mqtt.run()))
         try:

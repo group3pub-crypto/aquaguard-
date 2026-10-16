@@ -308,7 +308,10 @@ class ModelStore:
                 elif det_meta.get("feature_names", FEATURE_NAMES) != FEATURE_NAMES:
                     problem = "detector_metadata feature_names differ from shared FEATURE_NAMES"
                 elif not {str(c) for c in getattr(clf, "classes_", [])} <= {
-                    "normal", "leak", "burst", "overuse"
+                    "normal",
+                    "leak",
+                    "burst",
+                    "overuse",
                 }:
                     problem = "classifier has unexpected classes"
                 if problem:
@@ -440,6 +443,7 @@ async def classify_anomaly_ml(
     if x is None:
         log.warning("invalid_feature_vector_fallback_to_rules")
         return rules
+
     def _infer() -> tuple[list[str], np.ndarray, bool, float]:
         clf = store.clf
         classes = [str(c) for c in clf.classes_]

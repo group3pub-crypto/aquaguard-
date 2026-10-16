@@ -6,7 +6,7 @@ Contract (identical in training and serving):
   (bins ``(t-1min, t]``, mean of readings in the bin); training data is already per-minute.
 * A window is the last ``WINDOW`` (15) minutes ending at the window end minute; trailing
   aggregates look back ``HISTORY`` (120) minutes. Missing minutes (NaN) are forward-filled
-  causally within that history (leading gaps stay NaN and are ignored/zeroed).
+  causally within that history (gaps before the first sample take that sample; an all-missing history is 0).
 * The baseline is the per-flat distribution of RAW per-minute flows per hour-of-week slot
   (``slot = weekday*24 + hour``, Monday = 0) in LOCAL time: median, mad, p25, p75, p95, count.
   Slots with ``count == 0`` have no baseline (baseline features are 0 for those minutes).
@@ -210,12 +210,20 @@ def bin_to_minutes(
     return out
 
 
-def _ffill_rows(x: np.ndarray) -> np.ndarray:
-    """Causal forward fill along axis 1; leading NaNs stay NaN."""
-    idx = np.where(np.isnan(x), -1, np.arange(x.shape[1])[None, :])
-    idx = np.maximum.accumulate(idx, axis=1)
-    got = np.take_along_axis(x, np.maximum(idx, 0), axis=1)
-    return np.where(idx < 0, np.nan, got)
+def _ffill_rows(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Causal forward fill along axis 1. Gaps BEFORE the first valid sample (start of history, no
+    earlier data to carry forward) take that first valid value for the 15-min window statistics;
+    the returned mask marks them so the trailing minimum/volume can ignore them (as 'unknown').
+    An all-NaN row becomes 0."""
+    cols = np.arange(x.shape[1])[None, :]
+    idx = np.maximum.accumulate(np.where(np.isnan(x), -1, cols), axis=1)
+    out = np.take_along_axis(x, np.maximum(idx, 0), axis=1)
+    lead = idx < 0
+    if lead.any():
+        first = np.argmax(~np.isnan(x), axis=1)
+        first_val = np.where(np.isnan(x).all(axis=1), 0.0, x[np.arange(x.shape[0]), first])
+        out = np.where(lead, first_val[:, None], out)
+    return out, lead
 
 
 def extract_window_features(
@@ -235,11 +243,8 @@ def extract_window_features(
     sh = np.asarray(slot_hist, dtype=int).reshape(-1, HISTORY)
     hour = np.asarray(hour, dtype=float).reshape(-1)
     weekday = np.asarray(weekday, dtype=float).reshape(-1)
-    x = _ffill_rows(fh)
-    with np.errstate(all="ignore"):
-        night_min = np.nanmin(np.where(np.isnan(x), np.inf, x), axis=1)
-    night_min = np.where(np.isinf(night_min), 0.0, night_min)
-    x = np.nan_to_num(x, nan=0.0)
+    x, lead = _ffill_rows(fh)
+    night_min = np.where(lead.all(axis=1), 0.0, np.where(lead, np.inf, x).min(axis=1))
     w = x[:, -WINDOW:]
     ws = sh[:, -WINDOW:]
     mean = w.mean(axis=1)
@@ -261,7 +266,7 @@ def extract_window_features(
     f[:, 8] = hour
     f[:, 9] = weekday
     f[:, 10] = is_night_hour(hour).astype(float)
-    f[:, 11] = x[:, -VOLUME_SPAN:].sum(axis=1)
+    f[:, 11] = np.where(lead, 0.0, x)[:, -VOLUME_SPAN:].sum(axis=1)
     f[:, 13] = (w <= ZERO_EPS).mean(axis=1)
     return f
 
