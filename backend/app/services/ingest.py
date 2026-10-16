@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import random
 import time
 from datetime import UTC, datetime, timedelta
 from typing import TypeVar
+from uuid import UUID
 
 import structlog
 from pydantic import BaseModel, ValidationError
@@ -97,32 +99,53 @@ async def _resolve_flat(session, parsed: ParsedTopic) -> Flat:
     return flat
 
 
+FLAT_CACHE_TTL_S = 300.0
+FLAT_CACHE_MAX = 100_000
+
+
+async def _flat_ids(rt: Runtime, session, parsed: ParsedTopic) -> tuple[UUID, UUID]:
+    """(flat_id, society_id) for a topic; cached briefly so the hot path skips the join."""
+    key = (parsed.slug, parsed.unit)
+    hit = rt.flat_cache.get(key)
+    now = time.monotonic()
+    if hit and hit[2] > now:
+        return hit[0], hit[1]
+    flat = await _resolve_flat(session, parsed)
+    if len(rt.flat_cache) >= FLAT_CACHE_MAX:
+        rt.flat_cache.clear()
+    rt.flat_cache[key] = (flat.id, flat.society_id, now + FLAT_CACHE_TTL_S)
+    return flat.id, flat.society_id
+
+
 async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     data = _parse(FlowPayload, payload, rt.settings.mqtt_max_future_skew_s)
     ts = datetime.fromtimestamp(data.ts, UTC)
     now = datetime.now(UTC)
-    async with rt.db.session() as session:
-        flat = await _resolve_flat(session, parsed)
-        reading = FlowReading(
-            flat_id=flat.id,
-            timestamp=ts,
-            flow_rate=data.flow,
-            volume=data.vol,
-            pressure=data.psi,
-            temperature=data.tmp,
-            battery_pct=None if data.bat is None else round(data.bat),
-            rssi=data.rssi,
-            message_id=data.id.lower(),
-            received_at=now,
-        )
-        if not await ReadingRepository(session).add_idempotent(reading):
-            rt.counters["flow_duplicate"] += 1
-            return
-        await SensorHealthRepository(session).upsert(
-            flat.id, last_seen=now, status="online", missed_readings=0
-        )
-        flat_id, society_id = flat.id, flat.society_id
-        out = ReadingOut.model_validate(reading).model_dump(mode="json")
+    try:
+        async with rt.db.session() as session:
+            flat_id, society_id = await _flat_ids(rt, session, parsed)
+            reading = FlowReading(
+                flat_id=flat_id,
+                timestamp=ts,
+                flow_rate=data.flow,
+                volume=data.vol,
+                pressure=data.psi,
+                temperature=data.tmp,
+                battery_pct=None if data.bat is None else round(data.bat),
+                rssi=data.rssi,
+                message_id=data.id.lower(),
+                received_at=now,
+            )
+            if not await ReadingRepository(session).add_idempotent(reading):
+                rt.counters["flow_duplicate"] += 1
+                return
+            await SensorHealthRepository(session).upsert(
+                flat_id, last_seen=now, status="online", missed_readings=0
+            )
+            out = ReadingOut.model_validate(reading).model_dump(mode="json")
+    except Exception:
+        rt.flat_cache.pop((parsed.slug, parsed.unit), None)  # e.g. flat deleted: re-resolve
+        raise
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
     await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
@@ -152,9 +175,16 @@ async def handle_valve_state(rt: Runtime, parsed: ParsedTopic, payload: bytes) -
 async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
     """Debounced per-flat detection on the trailing window. Never raises."""
     mono = time.monotonic()
-    if mono - rt.last_detect.get(flat_id, float("-inf")) < rt.settings.detect_debounce_seconds:
+    debounce = rt.settings.detect_debounce_seconds
+    if mono - rt.last_detect.get(flat_id, float("-inf")) < debounce:
         return None
-    rt.last_detect[flat_id] = mono
+    if rt.detect_inflight >= rt.settings.detect_max_concurrency:
+        rt.counters["detect_shed"] += 1  # overloaded: try again on this flat's next reading
+        return None
+    # jitter (up to +25%) so flats that started together do not all re-trigger in one burst
+    rt.last_detect[flat_id] = mono + random.uniform(0.0, 0.25) * debounce
+    rt.detect_inflight += 1
+    rt.counters["detect_run"] += 1
     try:
         async with rt.db.session() as session:
             flat = await FlatRepository(session).get(flat_id)
@@ -195,6 +225,8 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
     except Exception:
         log.exception("detection_failed", flat=str(flat_id))
         return None
+    finally:
+        rt.detect_inflight -= 1
 
 
 async def refresh_sensor_health(rt: Runtime, now: datetime) -> int:

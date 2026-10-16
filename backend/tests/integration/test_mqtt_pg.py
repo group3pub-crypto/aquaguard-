@@ -95,7 +95,8 @@ async def test_service_reconnects_and_resubscribes_after_connection_loss(rt, tmp
     seen: list[str] = []
 
     async def handler(topic: str, payload: bytes) -> None:
-        seen.append(topic)
+        if topic.endswith("/flow"):  # ignore retained valve/state left on a shared broker
+            seen.append(topic)
 
     cid = f"it-backend-{uuid.uuid4().hex[:6]}"
     svc = MqttService(mqtt_settings(tmp_path), handler, client_id=cid)
@@ -132,12 +133,45 @@ async def test_handler_exception_does_not_kill_the_loop(tmp_path):
         await until(lambda: svc.connected)
         await publish(TOPIC, b"1")
         await until(lambda: len(calls) >= 1)
-        await until(lambda: svc.connected and svc.connect_count >= 2, timeout=30)
         await publish(TOPIC, b"2")
         await until(lambda: any(c == b"2" for c in calls))
+        assert svc.connected and svc.connect_count == 1
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_unacked_message_is_redelivered_after_crash_mid_processing(tmp_path):
+    """At-least-once: a worker that never finishes (process killed) leaves the QoS1 message
+    unacked, so the broker redelivers it to the restarted service."""
+    cid = f"it-backend-{uuid.uuid4().hex[:6]}"
+    got: list[bytes] = []
+    started = asyncio.Event()
+
+    async def hang(topic: str, payload: bytes) -> None:
+        if topic.endswith("/flow"):
+            started.set()
+            await asyncio.sleep(3600)
+
+    async def record(topic: str, payload: bytes) -> None:
+        if topic.endswith("/flow"):
+            got.append(payload)
+
+    svc = MqttService(mqtt_settings(tmp_path), hang, client_id=cid)
+    task = asyncio.create_task(svc.run())
+    await until(lambda: svc.connected)
+    await publish(TOPIC, b"must-not-be-lost")
+    await asyncio.wait_for(started.wait(), 10)
+    task.cancel()  # "crash": handler never completed, message never acked
+    await asyncio.gather(task, return_exceptions=True)
+
+    svc2 = MqttService(mqtt_settings(tmp_path), record, client_id=cid)
+    task2 = asyncio.create_task(svc2.run())
+    try:
+        await until(lambda: got == [b"must-not-be-lost"], timeout=20)
+    finally:
+        task2.cancel()
+        await asyncio.gather(task2, return_exceptions=True)
 
 
 async def test_anonymous_connection_is_refused():

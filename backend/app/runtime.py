@@ -53,11 +53,16 @@ class Runtime:
             "heartbeat_failed": 0,
             "valve_ack_ok": 0,
             "valve_ack_failed": 0,
+            "detect_run": 0,
+            "detect_shed": 0,
         }
     )
     demo: DemoState = field(default_factory=DemoState)
     last_detect: dict[UUID, float] = field(default_factory=dict)
+    # (slug, unit) -> (flat_id, society_id, expires_monotonic): saves a join per MQTT message
+    flat_cache: dict[tuple[str, str], tuple[UUID, UUID, float]] = field(default_factory=dict)
     last_flow_monotonic: float | None = None
+    detect_inflight: int = 0
 
     def dead_letter(self, topic: str, reason: str) -> None:
         self.dead_letters.append(

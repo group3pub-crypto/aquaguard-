@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.models import Anomaly
 from app.repositories.base import BaseRepository
+from app.scope import Scope
 
 
 class AnomalyRepository(BaseRepository[Anomaly]):
@@ -15,13 +16,16 @@ class AnomalyRepository(BaseRepository[Anomaly]):
     async def find(
         self,
         *,
+        scope: Scope | None = None,
         flat_id: uuid.UUID | None = None,
         anomaly_type: str | None = None,
         active_only: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Anomaly]:
-        stmt = select(Anomaly).order_by(Anomaly.detected_at.desc())
+        stmt = select(Anomaly).order_by(Anomaly.detected_at.desc(), Anomaly.id)
+        if scope is not None:
+            stmt = stmt.where(scope.flat_id_pred(Anomaly.flat_id))
         if flat_id:
             stmt = stmt.where(Anomaly.flat_id == flat_id)
         if anomaly_type:
@@ -29,6 +33,11 @@ class AnomalyRepository(BaseRepository[Anomaly]):
         if active_only:
             stmt = stmt.where(Anomaly.resolved_at.is_(None))
         return await self._all(stmt.limit(limit).offset(offset))
+
+    async def get_scoped(self, anomaly_id: uuid.UUID, scope: Scope) -> Anomaly | None:
+        return await self._one(
+            select(Anomaly).where(Anomaly.id == anomaly_id, scope.flat_id_pred(Anomaly.flat_id))
+        )
 
     async def open_for_flat(self, flat_id: uuid.UUID) -> list[Anomaly]:
         return await self._all(

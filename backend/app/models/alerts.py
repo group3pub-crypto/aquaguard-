@@ -72,6 +72,20 @@ class Alert(TimestampMixin, Base):
             postgresql_where=sa.text("state NOT IN ('resolved', 'overridden')"),
             sqlite_where=sa.text("state NOT IN ('resolved', 'overridden')"),
         ),
+        # escalation scan: candidates are open alerts by tier whose delay may have elapsed
+        sa.Index(
+            "ix_alerts_escalation",
+            "tier",
+            "created_at",
+            postgresql_where=sa.text("state IN ('nudge', 'alert', 'ticket')"),
+            sqlite_where=sa.text("state IN ('nudge', 'alert', 'ticket')"),
+        ),
+        sa.Index(
+            "ix_alerts_snoozed",
+            "snoozed_until",
+            postgresql_where=sa.text("state = 'snoozed'"),
+            sqlite_where=sa.text("state = 'snoozed'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=new_uuid)
@@ -91,6 +105,10 @@ class Alert(TimestampMixin, Base):
     acknowledged_by: Mapped[str | None] = mapped_column(sa.String(100))
     acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # auto shut-off safety: warning issued at (the close runs SHUTOFF_WARNING_SECONDS later) and
+    # the moment we gave up after a failed close + one retry
+    shutoff_warned_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    shutoff_gave_up_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class ValveCommand(Base):
@@ -105,6 +123,7 @@ class ValveCommand(Base):
             postgresql_where=sa.text("status = 'pending'"),
             sqlite_where=sa.text("status = 'pending'"),
         ),
+        sa.Index("ix_valve_commands_alert_issued", "alert_id", "issued_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=new_uuid)

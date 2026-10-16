@@ -57,7 +57,10 @@ class Flat(TimestampMixin, Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (sa.CheckConstraint(_in("role", ROLES), name="role"),)
+    __table_args__ = (
+        sa.CheckConstraint(_in("role", ROLES), name="role"),
+        sa.CheckConstraint("username = lower(username)", name="username_lower"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=new_uuid)
     username: Mapped[str] = mapped_column(sa.String(50), nullable=False, unique=True)
@@ -73,6 +76,22 @@ class User(Base):
     society_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("societies.id", ondelete="SET NULL")
     )
+    is_active: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=True, server_default=sa.true()
+    )
+    # service accounts (the chat bot) may assert `on_behalf_of` on actor-recording endpoints
+    is_service: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    # JWT claim `tv` must equal this: bumping it revokes every outstanding access token
+    token_version: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
+    failed_logins: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
+    last_failed_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, default=utcnow, server_default=sa.func.now()
     )

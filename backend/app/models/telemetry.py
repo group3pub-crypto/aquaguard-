@@ -15,6 +15,7 @@ class FlowReading(Base):
     __table_args__ = (
         sa.UniqueConstraint("flat_id", "message_id", name="uq_flow_readings_flat_message"),
         sa.Index("ix_flow_readings_flat_ts", "flat_id", "timestamp"),
+        sa.Index("ix_flow_readings_timestamp", "timestamp"),  # retention scans
     )
 
     id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
@@ -78,7 +79,10 @@ class Forecast(Base):
 
 class SensorHealth(Base):
     __tablename__ = "sensor_health"
-    __table_args__ = (sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="status"),)
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('online', 'late', 'offline')", name="status"),
+        sa.Index("ix_sensor_health_last_seen", "last_seen"),
+    )
 
     flat_id: Mapped[uuid.UUID] = mapped_column(
         sa.ForeignKey("flats.id", ondelete="CASCADE"), primary_key=True
