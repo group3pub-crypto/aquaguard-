@@ -34,7 +34,7 @@ def test_extract_features_basic_night_window():
     assert f["mean_flow"] == pytest.approx(1.0) and f["std_flow"] == 0.0
     assert f["zero_flow_pct"] == 0.0 and f["night_min_flow"] == 1.0
     assert (f["is_night"], f["hour_of_day"], f["day_of_week"]) == (1.0, 2.0, 1.0)
-    assert f["rolling_volume_1h"] == pytest.approx(15.5, abs=1.0)
+    assert f["rolling_volume_1h"] == pytest.approx(16.0)  # 16 observed minutes x 1 L/min
     assert f["baseline_deviation"] == 0.0  # no baseline
 
 
@@ -46,20 +46,22 @@ def test_extract_features_zero_flow_and_rate_of_change():
 
 
 def test_extract_features_with_baseline():
-    slots = bl.empty_slots()
-    slot = bl.hour_of_week(NIGHT)
-    slots[slot] = {
-        "slot": slot,
-        "median": 0.5,
-        "mad": 0.1,
-        "p25": 0.2,
-        "p75": 0.8,
-        "p95": 1.0,
-        "sample_count": 9,
-    }
+    slots = [
+        {**s, "median": 0.5, "mad": 0.1, "p25": 0.2, "p75": 0.8, "p95": 1.0, "sample_count": 9}
+        for s in bl.empty_slots()
+    ]
     f = d.extract_features(series(NIGHT - timedelta(minutes=15), 15, 2.5), slots, NIGHT)
-    assert f["baseline_deviation"] == pytest.approx((2.5 - 0.5) / 0.25)
-    assert f["pct_above_p95"] == 1.0 and f["duration_above_base"] == pytest.approx(15.5, abs=1.0)
+    # robust scale = max(1.4826*mad, IQR/1.349, 0.3 floor) - identical to training
+    assert f["baseline_deviation"] == pytest.approx((2.5 - 0.5) / (0.6 / 1.349))
+    assert f["pct_above_p95"] == 1.0 and f["duration_above_base"] == 15.0
+
+
+def test_window_is_exactly_15_minute_samples_and_night_is_00_to_05():
+    f = d.extract_features(
+        series(DAY - timedelta(minutes=30), 30, lambda i: float(i // 2)), None, DAY
+    )
+    assert (f["min_flow"], f["max_flow"]) == (15.5, 29.5)  # 15 one-minute bins, no 16th sample
+    assert [d.is_night_hour(h) for h in (0, 4, 5, 23)] == [True, True, False, False]
 
 
 def test_extract_features_ignores_future_and_handles_empty():
@@ -252,7 +254,19 @@ def train_models(path, seed=0, trained_at="2026-01-02T03:04:05+00:00"):
         path / "classifier.joblib",
     )
     joblib.dump(list(d.FEATURE_NAMES), path / "feature_names.joblib")
-    (path / "classifier_metadata.json").write_text(json.dumps({"trained_at": trained_at}))
+    (path / "detector_metadata.json").write_text(
+        json.dumps({"trained_at": trained_at, "data_hash": "abcdef0123456789"})
+    )
+    write_manifest(path)
+
+
+def write_manifest(path, names=("isolation_forest", "classifier", "feature_names", "forecaster")):
+    files = {
+        f"{n}.joblib": d.sha256_file(path / f"{n}.joblib")
+        for n in names
+        if (path / f"{n}.joblib").is_file()
+    }
+    (path / "manifest.json").write_text(json.dumps({"files": files}))
 
 
 async def test_store_loads_real_sklearn_models_and_versions_from_metadata(tmp_path):
@@ -260,8 +274,9 @@ async def test_store_loads_real_sklearn_models_and_versions_from_metadata(tmp_pa
     store = d.ModelStore(tmp_path)
     await store.ensure_loaded()
     assert store.ml_ready and store.feature_names == d.FEATURE_NAMES
-    trained, digest = store.version.rsplit("+", 1)
-    assert trained == "2026-01-02T03:04:05+00:00" and len(digest) == 8
+    trained, data, digest = store.version.rsplit("+", 2)
+    assert trained == "2026-01-02T03:04:05+00:00" and data == "abcdef01" and len(digest) == 8
+    assert store.model_status["detector"] == "ok" and store.model_status["classifier"] == "ok"
     det = await d.classify_anomaly_ml(NIGHT_LEAK, store)
     assert det.source == "ml" and set(det.class_probabilities) == {
         "burst",

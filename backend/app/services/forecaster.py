@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import structlog
+from aquaguard_features import FORECAST_FEATURES as FORECAST_FEATURES
 from aquaguard_features import forecast_feature_matrix
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -131,7 +131,10 @@ class FlatSimulator:
     def __init__(self, profile: Profile, society: str, seed: int, index: int, start_epoch: float):
         self.profile, self.society, self.seed = profile, society, seed
         self.rng = np.random.default_rng([seed, 3, index])
-        self.salt = int(np.random.default_rng([seed, 4, index]).integers(0, 2**32))
+        base_salt = int(np.random.default_rng([seed, 4, index]).integers(0, 2**32))
+        # mix in the boot time: a restarted device restarts `seq` at 1, and the backend dedupes on
+        # (flat, id), so identical ids after a reboot would silently drop fresh readings
+        self.salt = (base_salt + int(start_epoch)) & 0xFFFFFFFF
         self.valve_open = True
         self.volume_l = 0.0
         self.seq = 0

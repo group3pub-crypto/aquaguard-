@@ -6,7 +6,7 @@ Contract (identical in training and serving):
   (bins ``(t-1min, t]``, mean of readings in the bin); training data is already per-minute.
 * A window is the last ``WINDOW`` (15) minutes ending at the window end minute; trailing
   aggregates look back ``HISTORY`` (120) minutes. Missing minutes (NaN) are forward-filled
-  causally within that history (gaps before the first sample take that sample; an all-missing history is 0).
+  causally within that history (gaps before the first sample take that sample; all-missing = 0).
 * The baseline is the per-flat distribution of RAW per-minute flows per hour-of-week slot
   (``slot = weekday*24 + hour``, Monday = 0) in LOCAL time: median, mad, p25, p75, p95, count.
   Slots with ``count == 0`` have no baseline (baseline features are 0 for those minutes).

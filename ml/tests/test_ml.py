@@ -230,3 +230,41 @@ def test_demo_baseline_claim_holds():
     assert r["baseline_flagged"]
     assert r["baseline_detect_min_after_onset"] <= 60
     assert r["false_alarm_windows_other_days"] <= 3
+
+
+def test_manifest_matches_artifacts_and_report_has_honesty_section(tiny):
+    from ml.scripts.artifacts import sha256_file
+
+    out, rep, _ = tiny
+    files = json.loads((out / "manifest.json").read_text())["files"]
+    for name in ("classifier.joblib", "isolation_forest.joblib", "feature_names.joblib"):
+        assert files[name] == sha256_file(out / name)
+    text = (rep / "detector_report.md").read_text()
+    assert "Honesty section" in text and "episodes" in text and "95%" in text
+    assert "Median time-to-detect" not in text and "excludes alert debounce" in text
+    saved = json.loads((out / "detector_metadata.json").read_text())
+    assert set(saved["bootstrap"]["ci95"]) >= {"macro_f1", "leak_burst_recall"}
+    assert (
+        saved["leave_flats_out"]["folds"] >= 2 and saved["single_feature"]["feature"] == "min_flow"
+    )
+
+
+def test_forecaster_per_horizon_std_manifest_and_model_type(tmp_path):
+    meta = train_forecaster.main(
+        ["--flats", "3", "--days", "24", "--out", str(tmp_path), "--report-dir", str(tmp_path)]
+    )
+    assert meta["model_type"] == "HistGradientBoostingRegressor"
+    by_h = meta["residual_std_by_horizon"]
+    assert len(by_h) == train_forecaster.MAX_HORIZON and all(v > 0 for v in by_h)
+    assert 0 < meta["rollout"]["coverage_oos_served_steps_2_25"] <= 1
+    assert "forecaster.joblib" in json.loads((tmp_path / "manifest.json").read_text())["files"]
+    assert "Recursive multi-step" in (tmp_path / "forecaster_report.md").read_text()
+
+
+def test_generate_data_output_is_readable_by_trainers(tmp_path):
+    from ml.scripts.generate_data import load_dataset, save_dataset
+
+    df = generate_dataset(2, 3, seed=9)
+    save_dataset(df, tmp_path)
+    back = load_dataset(tmp_path)
+    assert dataset_hash(back) == dataset_hash(df.sort_values(["flat_id", "ts"], ignore_index=True))

@@ -206,3 +206,11 @@ async def test_flow_triggers_detection_alert_and_ws_broadcast(rt, db, world):
     assert len(alerts) == 1 and alerts[0].message_source == "template"
     types = {m["type"] for m in sent}
     assert {"reading", "anomaly", "alert"} <= types
+
+
+async def test_fractional_battery_percent_is_accepted(rt, db, world):
+    """The simulator/firmware report battery with decimals (e.g. 99.9)."""
+    await ingest.handle_message(rt, TOPIC, flow_msg(bat=99.9))
+    assert rt.counters["flow_ok"] == 1 and rt.counters["flow_failed"] == 0
+    rows = await readings(db, await flat_id(db))
+    assert rows[0].battery_pct == 100

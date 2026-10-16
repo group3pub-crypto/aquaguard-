@@ -38,7 +38,7 @@ def test_slot_statistics_are_raw_per_minute_per_hour_of_week():
 
 def test_baseline_uses_every_minute_not_hourly_means():
     # one hour of per-minute flow: 50 quiet minutes and 10 minutes at 6 L/min
-    samples = [(MON + timedelta(minutes=m + 1), 6.0 if m >= 50 else 0.0) for m in range(60)]
+    samples = [(MON + timedelta(minutes=m), 6.0 if m >= 50 else 0.0) for m in range(60)]
     slots, _ = bl.compute_slots(samples)
     s = slots[0]
     assert s["sample_count"] == 60 and s["median"] == 0.0 and s["p95"] == 6.0
@@ -48,13 +48,15 @@ def test_baseline_uses_every_minute_not_hourly_means():
 def test_readings_within_one_minute_are_averaged_first():
     samples = [(MON + timedelta(seconds=s_), v) for s_, v in [(10, 1.0), (50, 3.0), (70, 5.0)]]
     slots, _ = bl.compute_slots(samples)
-    assert slots[0]["sample_count"] == 2 and slots[0]["median"] == 3.0  # minutes: 2.0 and 5.0 -> 3.5?
+    assert (
+        slots[0]["sample_count"] == 2 and slots[0]["median"] == 3.5
+    )  # minute bins: mean(1,3)=2.0 and 5.0
 
 
 def test_slots_roundtrip_through_shared_baseline_exactly():
     from aquaguard_features import SlotBaseline
 
-    slots, _ = bl.compute_slots([(MON + timedelta(minutes=m + 1), (m * 0.37) % 4) for m in range(600)])
+    slots, _ = bl.compute_slots([(MON + timedelta(minutes=m), (m * 0.37) % 4) for m in range(600)])
     b = SlotBaseline.from_slots(json.loads(json.dumps(slots)))
     assert b is not None and b.count[0] == 60 and b.median[0] == slots[0]["median"]
 

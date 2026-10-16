@@ -110,7 +110,7 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
             volume=data.vol,
             pressure=data.psi,
             temperature=data.tmp,
-            battery_pct=data.bat,
+            battery_pct=None if data.bat is None else round(data.bat),
             rssi=data.rssi,
             message_id=data.id.lower(),
             received_at=now,

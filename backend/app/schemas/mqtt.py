@@ -22,7 +22,7 @@ class FlowPayload(BaseModel):
     vol: float = Field(ge=0, le=100_000)
     psi: float | None = Field(None, ge=0, le=500)
     tmp: float | None = Field(None, ge=-50, le=150)
-    bat: int | None = Field(None, ge=0, le=100)
+    bat: float | None = Field(None, ge=0, le=100)  # percent; firmware/simulator send decimals
     rssi: int | None = Field(None, ge=-150, le=0)
 
     @field_validator("ts")
@@ -42,7 +42,7 @@ class HeartbeatPayload(BaseModel):
     v: Literal[1]
     ts: float = Field(gt=0)
     uptime: int | None = Field(None, ge=0)
-    bat: int | None = Field(None, ge=0, le=100)
+    bat: float | None = Field(None, ge=0, le=100)
     fw: str | None = Field(None, max_length=50)
 
 

@@ -6,7 +6,7 @@
 > without recalibration (per-flat baselines from real data, threshold/operating-point tuning and
 > a labelled field validation). See the honesty section at the end.
 
-- Trained: 2026-10-16T15:54:38+00:00 | seed 42 | sklearn 1.9.1
+- Trained: 2026-10-16T16:04:02+00:00 | seed 42 | sklearn 1.9.1
 - Data: 12 flats x 30 days (hash `b2493be28dbd215f`), window = 15
   min, stride 5 min
 - Split: chronological, train < 2025-01-27T00:00:00+00:00 (72288 windows) /
@@ -75,8 +75,8 @@ period, so this tests unseen households and unseen time together.
 
 **Circularity.** A depth-3 tree on `min_flow` alone gets leak F1 0.994, burst F1
 0.826, overuse F1 0.000, macro-F1 0.703 on the same test
-set. On this synthetic generator the additive leak/burst floors make `min_flow` almost sufficient
-for leak/burst, and the generator's fault ranges (magnitude, L/min or x: slow_leak 0.5-3.0, running_toilet 0.45-0.55, dripping_tap 0.05-0.2, burst 15.0-50.0, overuse 2.0-4.0; duration, min:
+set. On this synthetic generator the additive leak/burst floors make `min_flow` highly informative
+for leak and burst (F1 above), and the generator's fault ranges (magnitude, L/min or x: slow_leak 0.5-3.0, running_toilet 0.45-0.55, dripping_tap 0.05-0.2, burst 15.0-50.0, overuse 2.0-4.0; duration, min:
 slow_leak 360-2160, running_toilet 360-1440, dripping_tap 720-2880, burst 10-120, overuse 60-480) mirror the thresholds of the rule fallback in the backend. High leak/burst scores
 therefore show the pipeline is wired correctly, not that real leaks are this separable. Overuse
 (multiplicative, overlaps normal peaks) is the hard class and the number to watch.

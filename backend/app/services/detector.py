@@ -91,6 +91,17 @@ def extract_features(
     )
 
 
+def raw_zero_flow_pct(readings, now: datetime) -> float:
+    """Fraction of RAW readings (any sampling rate) in the last 15 min with ~zero flow.
+
+    Unlike the model feature ``zero_flow_pct`` (computed on 1-minute bins, as in training) this
+    sees sub-minute stops, which is what an "is someone using water" check needs.
+    """
+    now = now if now.tzinfo else now.replace(tzinfo=UTC)
+    vals = [float(r.flow_rate) for r in readings if now - WINDOW < r.timestamp <= now]
+    return float(np.mean([v <= ZERO_FLOW for v in vals])) if vals else 0.0
+
+
 # ----------------------------------------------------------------------------- results
 @dataclass
 class Detection:
