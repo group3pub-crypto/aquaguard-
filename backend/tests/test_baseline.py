@@ -1,6 +1,8 @@
+import json
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 
 from app.models import FlowReading
 from app.repositories import BaselineRepository, FlatRepository
@@ -20,7 +22,7 @@ def test_hour_of_week_mapping():
     assert bl.hour_of_week(MON + timedelta(days=6, hours=23)) == 167
 
 
-def test_slot_statistics_are_computed_per_hour_of_week():
+def test_slot_statistics_are_raw_per_minute_per_hour_of_week():
     samples = [
         (MON + timedelta(weeks=w, minutes=5), v) for w, v in enumerate([1.0, 2.0, 3.0, 10.0])
     ]
@@ -29,15 +31,41 @@ def test_slot_statistics_are_computed_per_hour_of_week():
     assert days == 4 and s["sample_count"] == 4
     assert s["median"] == 2.5
     assert s["mad"] == 1.0  # median(|[1,2,3,10]-2.5|) = median([1.5,.5,.5,7.5])
-    assert s["p25"] == round(float(np.percentile([1, 2, 3, 10], 25)), 4)
-    assert s["p95"] == round(float(np.percentile([1, 2, 3, 10], 95)), 4)
+    assert s["p25"] == pytest.approx(float(np.percentile([1, 2, 3, 10], 25)), abs=1e-12)
+    assert s["p95"] == pytest.approx(float(np.percentile([1, 2, 3, 10], 95)), abs=1e-12)
     assert slots[1]["sample_count"] == 0  # other slots untouched
 
 
-def test_readings_within_one_hour_are_averaged_first():
-    samples = [(MON + timedelta(minutes=m), v) for m, v in [(1, 0.5), (20, 1.5), (40, 1.0)]]
+def test_baseline_uses_every_minute_not_hourly_means():
+    # one hour of per-minute flow: 50 quiet minutes and 10 minutes at 6 L/min
+    samples = [(MON + timedelta(minutes=m + 1), 6.0 if m >= 50 else 0.0) for m in range(60)]
     slots, _ = bl.compute_slots(samples)
-    assert slots[0]["sample_count"] == 1 and slots[0]["median"] == 1.0
+    s = slots[0]
+    assert s["sample_count"] == 60 and s["median"] == 0.0 and s["p95"] == 6.0
+    assert s["mean"] == pytest.approx(1.0)  # hourly-mean level for the forecaster fallback
+
+
+def test_readings_within_one_minute_are_averaged_first():
+    samples = [(MON + timedelta(seconds=s_), v) for s_, v in [(10, 1.0), (50, 3.0), (70, 5.0)]]
+    slots, _ = bl.compute_slots(samples)
+    assert slots[0]["sample_count"] == 2 and slots[0]["median"] == 3.0  # minutes: 2.0 and 5.0 -> 3.5?
+
+
+def test_slots_roundtrip_through_shared_baseline_exactly():
+    from aquaguard_features import SlotBaseline
+
+    slots, _ = bl.compute_slots([(MON + timedelta(minutes=m + 1), (m * 0.37) % 4) for m in range(600)])
+    b = SlotBaseline.from_slots(json.loads(json.dumps(slots)))
+    assert b is not None and b.count[0] == 60 and b.median[0] == slots[0]["median"]
+
+
+def test_hour_of_week_follows_configured_timezone():
+    bl.configure_timezone("Asia/Kolkata")  # UTC+5:30
+    try:
+        assert bl.hour_of_week(MON) == 5  # Monday 00:00 UTC = 05:30 local
+        assert bl.hour_of_week(MON + timedelta(hours=19)) == 24  # Tuesday 00:30 local
+    finally:
+        bl.configure_timezone("UTC")
 
 
 def test_learning_to_ready_at_14_days():
