@@ -42,8 +42,10 @@ def run_demo(seed: int = 7) -> dict:
         w["ts"] < START + pd.Timedelta(minutes=start + LEAK_MIN)
     )
     first = w[flagged & in_leak]["ts"]
-    day = df[(df["ts"] >= START + pd.Timedelta(days=leak_day))
-             & (df["ts"] < START + pd.Timedelta(days=leak_day + 1))]
+    day = df[
+        (df["ts"] >= START + pd.Timedelta(days=leak_day))
+        & (df["ts"] < START + pd.Timedelta(days=leak_day + 1))
+    ]
     daily_total = float(day["flow"].sum())
 
     # how long would the cap take to trip if the same leak ran all day?
@@ -59,7 +61,9 @@ def run_demo(seed: int = 7) -> dict:
         "baseline_flagged": bool(first.size),
         "baseline_detect_min_after_onset": float(
             (first.iloc[0] - (START + pd.Timedelta(minutes=start))).total_seconds() / 60
-        ) if first.size else None,
+        )
+        if first.size
+        else None,
         "false_alarm_windows_other_days": int(flagged[~in_leak].sum()),
         "windows_other_days": int((~in_leak).sum()),
         "cap_trip_hours_if_leak_all_day": cap_trip_h,
@@ -70,16 +74,24 @@ def main() -> None:
     r = run_demo()
     print("AquaGuard demo: 2 L/min slow leak, 00:00-01:30, single-person flat (synthetic)")
     print(f"  leak volume that night            : {r['leak_volume_l']:.0f} L")
-    print(f"  daily total incl. leak            : {r['daily_total_l']:.0f} L "
-          f"(cap {r['daily_cap_l']:.0f} L) -> fixed cap "
-          f"{'MISSED the leak' if r['cap_missed'] else 'tripped'}")
-    print(f"  personal baseline                 : "
-          f"{'FLAGGED' if r['baseline_flagged'] else 'missed'} "
-          f"{r['baseline_detect_min_after_onset']:.0f} min after onset")
-    print(f"  baseline false alarms elsewhere   : {r['false_alarm_windows_other_days']} of "
-          f"{r['windows_other_days']} windows")
-    print(f"  cap would trip only after         : {r['cap_trip_hours_if_leak_all_day']:.1f} h "
-          "of a leak running all day")
+    print(
+        f"  daily total incl. leak            : {r['daily_total_l']:.0f} L "
+        f"(cap {r['daily_cap_l']:.0f} L) -> fixed cap "
+        f"{'MISSED the leak' if r['cap_missed'] else 'tripped'}"
+    )
+    print(
+        f"  personal baseline                 : "
+        f"{'FLAGGED' if r['baseline_flagged'] else 'missed'} "
+        f"{r['baseline_detect_min_after_onset']:.0f} min after onset"
+    )
+    print(
+        f"  baseline false alarms elsewhere   : {r['false_alarm_windows_other_days']} of "
+        f"{r['windows_other_days']} windows"
+    )
+    print(
+        f"  cap would trip only after         : {r['cap_trip_hours_if_leak_all_day']:.1f} h "
+        "of a leak running all day"
+    )
 
 
 if __name__ == "__main__":

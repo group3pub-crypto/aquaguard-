@@ -54,8 +54,10 @@ def main(argv: list[str] | None = None) -> None:
     r = evaluate(a.models, a.seed, a.flats, a.days)
     m = r["metrics"]
     print(f"[evaluate] fresh synthetic households (seed {a.seed}); still synthetic, not field data")
-    print(f"  macro-F1={m['macro_f1']:.3f} leak+burst recall={m['leak_burst_recall']} "
-          f"FPR(normal)={m['false_positive_rate_normal']}")
+    print(
+        f"  macro-F1={m['macro_f1']:.3f} leak+burst recall={m['leak_burst_recall']} "
+        f"FPR(normal)={m['false_positive_rate_normal']}"
+    )
     print(f"  per-class F1: { {c: round(v['f1'], 3) for c, v in m['per_class'].items()} }")
     print(f"  time-to-detect: {m['time_to_detect_min']}")
     if a.shap:

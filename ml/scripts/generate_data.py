@@ -169,7 +169,9 @@ def generate_dataset(
     n_flats: int, days: int, seed: int, inject_faults: bool = True
 ) -> pd.DataFrame:
     hs = make_households(n_flats, seed)
-    frames = [generate_flat(h, days, seed, i, inject_faults=inject_faults) for i, h in enumerate(hs)]
+    frames = [
+        generate_flat(h, days, seed, i, inject_faults=inject_faults) for i, h in enumerate(hs)
+    ]
     return pd.concat(frames, ignore_index=True)
 
 

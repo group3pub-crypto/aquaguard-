@@ -53,17 +53,24 @@ def prepare(df: pd.DataFrame, days: int, stride: int):
     split = split_timestamp(days)
     baselines = build_baselines(df, split)
     w = featurize_dataset(df, baselines, stride)
-    return w[w["ts"] < split].reset_index(drop=True), w[w["ts"] >= split].reset_index(drop=True), (
-        baselines
-    ), split
+    return (
+        w[w["ts"] < split].reset_index(drop=True),
+        w[w["ts"] >= split].reset_index(drop=True),
+        (baselines),
+        split,
+    )
 
 
 def compute_metrics(test: pd.DataFrame, pred: np.ndarray, episodes: pd.DataFrame) -> dict:
     y = test["label"].to_numpy()
     p, r, f, s = precision_recall_fscore_support(y, pred, labels=CLASSES, zero_division=0)
     per_class = {
-        c: {"precision": float(p[i]), "recall": float(r[i]), "f1": float(f[i]),
-            "support": int(s[i])}
+        c: {
+            "precision": float(p[i]),
+            "recall": float(r[i]),
+            "f1": float(f[i]),
+            "support": int(s[i]),
+        }
         for i, c in enumerate(CLASSES)
     }
     normal = y == "normal"
@@ -74,7 +81,8 @@ def compute_metrics(test: pd.DataFrame, pred: np.ndarray, episodes: pd.DataFrame
         "macro_f1": float(np.mean(f)),
         "leak_burst_recall": float((pred[lb] != "normal").mean()) if lb.any() else None,
         "false_positive_rate_normal": float((pred[normal] != "normal").mean())
-        if normal.any() else None,
+        if normal.any()
+        else None,
         "confusion_matrix": {
             "labels": CLASSES,
             "matrix": confusion_matrix(y, pred, labels=CLASSES).tolist(),
@@ -92,7 +100,8 @@ def isolation_stats(iso: IsolationForest, test: pd.DataFrame) -> dict:
     y = test["label"].to_numpy()
     return {
         "flag_rate_on_normal": float(flagged[y == "normal"].mean()),
-        "flag_rate_on_faults": float(flagged[y != "normal"].mean()) if (y != "normal").any()
+        "flag_rate_on_faults": float(flagged[y != "normal"].mean())
+        if (y != "normal").any()
         else None,
     }
 
@@ -122,7 +131,9 @@ def write_report(path: Path, meta: dict) -> None:
 > a labelled field validation).
 
 - Trained: {meta["trained_at"]} | seed {meta["seed"]} | sklearn {meta["sklearn_version"]}
-- Data: {meta["n_flats"]} flats x {meta["days"]} days (hash `{meta["data_hash"]}`), window = {WINDOW}
+- Data: {meta["n_flats"]} flats x {meta["days"]} days (hash `{meta["data_hash"]}`), window = {
+        WINDOW
+    }
   min, stride {meta["stride"]} min
 - Split: chronological, train < {meta["split_ts"]} ({meta["n_train"]} windows) /
   test >= split ({meta["n_test"]} windows). Baselines use train-period normal data only;
@@ -143,8 +154,11 @@ def write_report(path: Path, meta: dict) -> None:
 - Median time-to-detect: {ttd_s} ({ttd["episodes_detected"]}/{ttd["episodes_total"]} test
   episodes detected; measured from true fault onset to first non-normal window)
 - IsolationForest on test: flags {meta["isolation"]["flag_rate_on_normal"]:.1%} of normal and
-  {"n/a" if meta["isolation"]["flag_rate_on_faults"] is None else
-   f"{meta['isolation']['flag_rate_on_faults']:.1%}"} of fault windows (unsupervised side signal)
+  {
+        "n/a"
+        if meta["isolation"]["flag_rate_on_faults"] is None
+        else f"{meta['isolation']['flag_rate_on_faults']:.1%}"
+    } of fault windows (unsupervised side signal)
 
 Confusion matrix (rows = truth, columns = prediction):
 
@@ -235,8 +249,10 @@ def main(argv: list[str] | None = None) -> dict:
 
     m = metrics
     print(f"[detector] trained in {time.time() - t0:.0f}s  train={len(train)} test={len(test)}")
-    print(f"  macro-F1={m['macro_f1']:.3f}  leak+burst recall={m['leak_burst_recall']}  "
-          f"FPR(normal)={m['false_positive_rate_normal']}")
+    print(
+        f"  macro-F1={m['macro_f1']:.3f}  leak+burst recall={m['leak_burst_recall']}  "
+        f"FPR(normal)={m['false_positive_rate_normal']}"
+    )
     print(f"  per-class F1: { {c: round(v['f1'], 3) for c, v in m['per_class'].items()} }")
     print(f"  time-to-detect: {m['time_to_detect_min']}")
     return meta

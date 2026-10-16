@@ -119,9 +119,9 @@ def write_report(path: Path, meta: dict) -> None:
 | RMSE (L/min) | {h["rmse"]:.4f} | {b["rmse"]:.4f} |
 | MAPE (eps={MAPE_EPS}) | {h["mape"]:.3f} | {b["mape"]:.3f} |
 
-CV MAE per fold (model / naive): {", ".join(f"{m:.4f} / {n:.4f}"
-                                            for m, n in zip(cv["mae"], cv["naive_mae"],
-                                                            strict=True))}
+CV MAE per fold (model / naive): {
+        ", ".join(f"{m:.4f} / {n:.4f}" for m, n in zip(cv["mae"], cv["naive_mae"], strict=True))
+    }
 
 Notes: MAPE is dominated by near-zero night hours even with the epsilon guard; prefer MAE/RMSE.
 The saved model is the train-split fit (not refit on the holdout) so reported numbers match it.
@@ -140,8 +140,10 @@ def main(argv: list[str] | None = None) -> dict:
 
     t0 = time.time()
     df = generate_dataset(a.flats, a.days, a.seed, inject_faults=False)
-    parts = [build_forecast_features(hourly_series(g)).assign(flat_id=fid)
-             for fid, g in df.groupby("flat_id", observed=True)]
+    parts = [
+        build_forecast_features(hourly_series(g)).assign(flat_id=fid)
+        for fid, g in df.groupby("flat_id", observed=True)
+    ]
     data = pd.concat(parts).sort_values(["ts", "flat_id"], ignore_index=True)
     cut = int(len(data) * (1 - HOLDOUT_FRAC))
     train, hold = data.iloc[:cut], data.iloc[cut:]

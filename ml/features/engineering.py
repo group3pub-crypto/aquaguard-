@@ -150,8 +150,9 @@ def featurize_dataset(
     parts = []
     for fid, g in df.groupby("flat_id", observed=True, sort=True):
         g = g.sort_values("ts")
-        f = extract_features(pd.DatetimeIndex(g["ts"]), g["flow"].to_numpy(float), baselines[fid],
-                             stride)
+        f = extract_features(
+            pd.DatetimeIndex(g["ts"]), g["flow"].to_numpy(float), baselines[fid], stride
+        )
         f.insert(1, "flat_id", fid)
         sel = np.arange(WARMUP, len(g), stride)
         f["fault"] = g["fault"].astype(str).to_numpy()[sel]
