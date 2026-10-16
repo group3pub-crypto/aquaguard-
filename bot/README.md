@@ -15,48 +15,68 @@ TELEGRAM_BOT_TOKEN=... BOT_API_PASSWORD=... python -m bot.main
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | required, from @BotFather; never logged |
 | `TELEGRAM_ADMIN_IDS` | comma-separated Telegram user ids with the admin role |
-| `BOT_API_BASE_URL` / `BOT_API_USERNAME` / `BOT_API_PASSWORD` | backend service account (admin or maintenance account, see below) |
-| `BOT_STATE_FILE` | JSON file persisting approved links (optional) |
-| `BOT_POLL_INTERVAL` | alert poll period in seconds (default 30) |
+| `BOT_API_BASE_URL` / `BOT_API_USERNAME` / `BOT_API_PASSWORD` | backend service account (must be admin: ack/snooze/resolve need staff, valve-control needs admin) |
+| `BOT_STATE_FILE` | JSON file with approved links (atomic writes, mode 0600) |
+| `BOT_SEEN_FILE` | delivered-alert ids (default `seen_alerts.json` beside `BOT_STATE_FILE`); without a state dir, dedupe is in-memory only |
+| `BOT_AUDIT_FILE` | bot-side audit log, JSON lines (default `audit.jsonl` beside `BOT_STATE_FILE`) |
+| `BOT_POLL_INTERVAL` | alert poll period in seconds (default 30; backs off up to 300 s on failure) |
 
 ## Commands
 
-`/start`, `/link <username>`, `/status`, `/alerts`, `/report`, `/valve <unit> open|close`
-(admin; always needs an inline "Confirm" press). Free text such as "which flats are leaking"
-or "top losses" is matched by simple regex rules and routed through the tool registry.
+`/start`, `/link <backend_username>`, `/status`, `/alerts`, `/usage [unit] [hours]`; staff: `/report`, `/losses [days]`;
+admin: `/valve <unit> open|close` (inline Confirm, valid 60 s, single use, only for the originating user, chat and
+message), `/approve <request_id> <flat_unit|maintenance>`, `/reject <request_id>`, `/revoke <telegram_id>`.
+Free text such as "which flats are leaking" or "top losses" is matched by regex rules and routed through the registry.
 
 ## Authorization model
 
-- Admins = ids in `TELEGRAM_ADMIN_IDS`. Anyone else must `/link`; an admin approves via an
-  inline button. Linked users are residents only; the bot cannot grant higher roles.
-- Roles: resident < maintenance < admin. Every tool call, including button callbacks, is
-  role-checked at the registry (`ToolRegistry.call`), never trusting callback data.
-- Note: the bot acts on the backend as one service account. Per-user roles are enforced by
-  the bot, not by the backend, so keep the bot host trusted.
-- Outbound sends are limited to 25 msg/s, text is MarkdownV2-escaped, httpx logging is
-  silenced so the token (part of Telegram API URLs) is not logged.
+- Admins = ids in `TELEGRAM_ADMIN_IDS`. Anyone else runs `/link <backend_username>` (rate limited to 3 per hour,
+  at most 50 pending requests, 24 h TTL). An admin approves with `/approve <request_id> <flat_unit>` (resident, bound
+  to that flat) or `/approve <request_id> maintenance` (staff). The claimed username is NOT verified against the
+  backend (no lookup endpoint); the admin vouches for it. Nobody can become admin through the bot.
+- Residents see only their bound flat (usage, alerts, alert pushes); `top_losses`, reports and status are staff only.
+  Maintenance can ack/snooze/resolve and see all flats, but not use the valve. Old link files without a role/flat
+  binding are ignored (re-link required).
+- The bot talks to the backend as one admin service account, so this scoping is enforced by the bot only. Backend-side
+  scoping of resident tokens is separate work; keep the bot host trusted.
+- Roles are re-checked in `ToolRegistry.call` for every command and button press.
+
+## Alerts and the poller
+
+Backend states: `nudge, alert, ticket, auto_shutoff, acknowledged, snoozed, overridden, resolved`.
+`alert`, `ticket` and `auto_shutoff` are pushed individually; `nudge` only as one digest message per poll. The dedupe
+key is `<alert_id>:<state>` (so escalations are pushed again), marked only after at least one successful delivery,
+persisted in `BOT_SEEN_FILE`. Per-chat failures (blocked bot, network) are logged and do not stop other chats. Poll
+failures are logged with a traceback and retried with exponential backoff. On the very first start (no seen file) the
+current backlog is recorded, not pushed. PTB has a global error handler that logs with traceback.
+
+## Actor attribution (important)
+
+The backend ignores `acknowledged_by` / `snoozed_by` in request bodies and records the **service account** for
+acknowledge, snooze and resolve. The human behind the Telegram action is therefore recorded only in the bot-side audit
+log (`bot.audit` logger and `BOT_AUDIT_FILE`), not in the backend audit. The exception is valve commands: the bot sends
+`issued_by=telegram:<id>/<username>`, which the backend stores in `ValveCommand.issued_by`.
 
 ## Tool registry / watsonx Orchestrate
 
-`bot.tools.build_default_registry().get_tool_schemas(role=None)` returns function-calling
-definitions (`{"type":"function","function":{name,description,parameters}}` plus an
-`x-required-role` hint). Feed these to IBM watsonx Orchestrate / BOB as tool specs and
-dispatch the model's tool calls with `await registry.call(name, args, role, api)`, which
-validates arguments against the schema and enforces the role. Tools: `get_usage_summary`,
-`list_active_alerts`, `acknowledge_alert`, `snooze_alert`, `top_losses`, `set_valve`,
-`generate_report`. A state-changing tool such as `set_valve` should always be gated by a
-human confirmation step in the orchestrator.
+`bot.tools.build_default_registry().get_tool_schemas(role=None)` returns function-calling definitions
+(`{"type":"function","function":{name,description,parameters}}` plus an `x-required-role` hint). Dispatch tool calls
+with `await registry.call(name, args, principal, api)`, which validates arguments and enforces role and flat scoping.
+Tools: `get_usage_summary`, `list_active_alerts`, `acknowledge_alert`, `snooze_alert`, `resolve_alert`, `top_losses`,
+`generate_report`, `system_status`, `set_valve`. State-changing tools should be gated by a human confirmation step.
 
 ## Backend endpoints used
 
-All in `bot/api_client.py` (Bearer JWT, `/api/v1`): `POST /auth/login`, `GET /alerts?state=&limit=`,
-`POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/snooze` (15/30/60/120 min), `GET /societies`,
-`GET /flats?society_id=` (unit number -> flat id), and `POST /tools/{active-alerts, flat-usage,
-top-losses, valve-control, weekly-report}`. The bot uses the first society returned by `/societies`.
+All in `bot/api_client.py` (Bearer JWT, `/api/v1`): `POST /auth/login`, `GET /alerts?state=&flat_id=&limit=`,
+`POST /alerts/{id}/{acknowledge,snooze,resolve}` (snooze: `duration_minutes` 15/30/60/120), `GET /societies`,
+`GET /societies/{id}/stats`, `GET /flats?society_id=&limit=&offset=` (cached 5 min; unit number <-> flat id), and
+`POST /tools/{active-alerts, flat-usage (hours), top-losses (days, limit), valve-control, weekly-report}`.
+The bot serves the first society returned by `/societies`. `tests/openapi.snapshot.json` is a snapshot of the backend
+OpenAPI (regenerate: `cd backend && ENVIRONMENT=test python -c "from app.main import app_factory; import json;
+json.dump(app_factory().openapi(), open('../bot/tests/openapi.snapshot.json','w'), indent=1, sort_keys=True)"`);
+tests check request paths, params and bodies against it.
 
 ## Creating the bot service account
 
-`make seed` creates only the demo admin/resident users, not the bot account. Create it once:
-register a user (e.g. `bot_service`) via the API/dashboard, then promote it as an admin with
-`PUT /api/v1/auth/users/{id}/role` to `admin` (or `maintenance` if valve control is not needed
-through the bot). Put its credentials in `BOT_API_USERNAME` / `BOT_API_PASSWORD`.
+Register a user (e.g. `bot_service`) via the API/dashboard, then promote it with
+`PUT /api/v1/auth/users/{id}/role` to `admin`. Put its credentials in `BOT_API_USERNAME` / `BOT_API_PASSWORD`.

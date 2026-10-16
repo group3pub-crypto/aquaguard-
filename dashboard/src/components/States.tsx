@@ -1,4 +1,20 @@
 import type { ReactNode } from 'react';
+import { ApiError } from '@/lib/api';
+
+export function isForbidden(e: Error | null | undefined): boolean {
+  return e instanceof ApiError && e.status === 403;
+}
+
+export function PermissionState({ what }: { what?: string }) {
+  return (
+    <div role="alert" className="rounded-lg border border-line bg-panel p-6">
+      <p className="font-semibold">You don&apos;t have permission</p>
+      <p className="mt-1 text-sm text-ink-2">
+        {what ? `Your account cannot access ${what}.` : 'Your account cannot access this.'} Ask an administrator if you need access.
+      </p>
+    </div>
+  );
+}
 
 export function LoadingState({ label = 'Loading' }: { label?: string }) {
   return (
@@ -66,6 +82,7 @@ export function DataState<T>({
   children: (d: T) => ReactNode;
 }) {
   if (data === null && loading) return <LoadingState label={loadingLabel} />;
+  if (data === null && isForbidden(error)) return <PermissionState />;
   if (data === null && error) return <ErrorState message={error.message} onRetry={onRetry} />;
   if (data === null) return <LoadingState label={loadingLabel} />;
   if (isEmpty ? isEmpty(data) : Array.isArray(data) && data.length === 0) {

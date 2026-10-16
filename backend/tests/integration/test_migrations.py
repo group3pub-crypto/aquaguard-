@@ -117,7 +117,7 @@ def test_cascade_deletes_and_set_null(clean_head):
     _rows("INSERT INTO sensor_health (flat_id, status) VALUES (:f,'online')", f=fid)
     _rows("INSERT INTO anomalies (id, flat_id, detected_at, anomaly_type, confidence, severity) VALUES (:a,:f,now(),'leak',0.9,0.9)", a=aid, f=fid)
     _rows("INSERT INTO alerts (id, flat_id, anomaly_id, state, tier, severity_score) VALUES (:l,:f,:a,'alert',2,0.5)", l=alert, f=fid, a=aid)
-    _rows("INSERT INTO valve_commands (flat_id, alert_id, command, source, issued_at) VALUES (:f,:l,'close','auto',now())", f=fid, l=alert)
+    _rows("INSERT INTO valve_commands (id, flat_id, alert_id, command, source, issued_at) VALUES (gen_random_uuid(),:f,:l,'close','auto',now())", f=fid, l=alert)
     _rows("INSERT INTO audit_log (entity_type, action, actor, flat_id) VALUES ('alert','x','sys',:f)", f=fid)
     _rows("DELETE FROM societies WHERE id=:s", s=sid)
     for table in ("flats", "flow_readings", "sensor_health", "anomalies", "alerts", "valve_commands"):

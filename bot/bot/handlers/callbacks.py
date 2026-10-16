@@ -45,7 +45,9 @@ async def dispatch(
             if parts[1] == "snooze":
                 args["minutes"] = 60
             text = await deps.registry.call(_ALERT_TOOLS[parts[1]], args, principal, deps.api)
-            deps.audit.record(f"alert_{parts[1]}", principal.actor if principal else f"telegram:{uid}", alert_id=parts[2])
+            deps.audit.record(
+                f"alert_{parts[1]}", principal.actor if principal else f"telegram:{uid}", alert_id=parts[2]
+            )
             return text
     except Exception as exc:  # noqa: BLE001
         return explain(exc)

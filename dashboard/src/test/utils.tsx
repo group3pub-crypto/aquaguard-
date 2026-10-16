@@ -40,7 +40,7 @@ export function mockFetch(handler: Handler) {
 }
 
 export function makeUser(role: Role, username = 'alice'): User {
-  return { id: 1, username, name: 'Alice Example', role };
+  return { id: '11111111-1111-4111-8111-111111111111', username, name: 'Alice Example', role };
 }
 
 export function authValue(role: Role | null, username = 'alice'): AuthContextValue {
@@ -53,6 +53,7 @@ export function authValue(role: Role | null, username = 'alice'): AuthContextVal
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
+    expireSession: vi.fn(),
   };
 }
 

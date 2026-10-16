@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import UTC, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo
 
 import numpy as np
+from aquaguard_features import MAD_SCALE as MAD_SCALE
+from aquaguard_features import SLOTS as SLOTS
+from aquaguard_features import fit_slot_baseline
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Baseline, Flat
 from app.repositories import AuditRepository, BaselineRepository, ReadingRepository
 
-SLOTS = 168
 READY_DAYS = 14
 STALE_AFTER = timedelta(days=7)
 TRAINING_WINDOW_DAYS = 28
-MAD_SCALE = 1.4826
 
 _tz: tzinfo = UTC
 
@@ -44,42 +44,44 @@ def empty_slots() -> list[dict]:
             "p25": 0.0,
             "p75": 0.0,
             "p95": 0.0,
+            "mean": 0.0,
+            "hourly_std": 0.0,
             "sample_count": 0,
         }
         for i in range(SLOTS)
     ]
 
 
-def compute_slots(samples: list[tuple[datetime, float]]) -> tuple[list[dict], int]:
-    """Per-slot stats over hourly mean flows (one sample per calendar hour).
+def minute_bins(samples: list[tuple[datetime, float]]) -> tuple[np.ndarray, np.ndarray]:
+    """Collapse readings to per-minute values: bin ``(t-1min, t]`` -> mean flow, keyed by the bin
+    END epoch seconds (same binning as serving's ``bin_to_minutes``)."""
+    if not samples:
+        return np.empty(0), np.empty(0)
+    ts = np.asarray(
+        [(t if t.tzinfo else t.replace(tzinfo=UTC)).timestamp() for t, _ in samples], dtype=float
+    )
+    fl = np.asarray([f for _, f in samples], dtype=float)
+    ok = np.isfinite(fl)
+    end = np.ceil(ts[ok] / 60.0 - 1e-9) * 60.0
+    uniq, inv = np.unique(end, return_inverse=True)
+    sums = np.bincount(inv, weights=fl[ok])
+    return uniq, sums / np.bincount(inv)
 
-    Returns (slots, distinct_days_observed).
+
+def compute_slots(samples: list[tuple[datetime, float]]) -> tuple[list[dict], int]:
+    """Per-slot stats over RAW per-minute flows (same semantics as ml training).
+
+    Returns (slots, distinct_local_days_observed). Slots keep the 168-entry JSON schema; extra
+    keys ``mean``/``hourly_std`` (hourly-mean level, used by the forecaster fallback) are additive.
     """
-    hourly: dict[tuple, list[float]] = defaultdict(list)
-    for ts, flow in samples:
-        d = local(ts)
-        hourly[(d.date(), d.hour)].append(flow)
-    per_slot: dict[int, list[float]] = defaultdict(list)
-    days = set()
-    for (date, hour), vals in hourly.items():
-        days.add(date)
-        per_slot[datetime(date.year, date.month, date.day).weekday() * 24 + hour].append(
-            float(np.mean(vals))
-        )
-    slots = empty_slots()
-    for slot, vals in per_slot.items():
-        arr = np.asarray(vals)
-        med = float(np.median(arr))
-        slots[slot] = {
-            "slot": slot,
-            "median": round(med, 4),
-            "mad": round(float(np.median(np.abs(arr - med))), 4),
-            "p25": round(float(np.percentile(arr, 25)), 4),
-            "p75": round(float(np.percentile(arr, 75)), 4),
-            "p95": round(float(np.percentile(arr, 95)), 4),
-            "sample_count": len(vals),
-        }
-    return slots, len(days)
+    ends, flows = minute_bins(samples)
+    if ends.size == 0:
+        return empty_slots(), 0
+    locs = [local(datetime.fromtimestamp(float(e), UTC)) for e in ends]
+    slot = np.asarray([d.weekday() * 24 + d.hour for d in locs])
+    hour_id = np.asarray([d.toordinal() * 24 + d.hour for d in locs])
+    days = {d.date() for d in locs}
+    return fit_slot_baseline(slot, flows, hour_id).to_slots(), len(days)
 
 
 def status_for(sample_days: int) -> str:

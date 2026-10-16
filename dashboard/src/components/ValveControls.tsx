@@ -5,17 +5,20 @@ import { valveTone } from '@/lib/format';
 import { useAuth } from '@/context/AuthProvider';
 import { useLive } from '@/context/LiveProvider';
 import { useAction } from '@/hooks/useAction';
-import type { Id, ValveState } from '@/lib/types';
+import type { Id, ValveCommandRecord, ValveState } from '@/lib/types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StatusBadge } from './StatusBadge';
 
 export function ValveControls({
   flatId,
   valveState,
+  pendingCommand,
   onChanged,
 }: {
   flatId: Id;
   valveState: ValveState;
+  /** Latest unconfirmed command seen on the WebSocket, if any. */
+  pendingCommand?: ValveCommandRecord;
   onChanged?: () => void;
 }) {
   const { user, can } = useAuth();
@@ -43,6 +46,7 @@ export function ValveControls({
       <div className="flex items-center gap-3">
         <span className="text-sm text-ink-2">Valve</span>
         <StatusBadge tone={valveTone(valveState)}>{valveState}</StatusBadge>
+        {pendingCommand ? <span className="text-xs text-ink-2">{pendingCommand.command} command awaiting device confirmation</span> : null}
       </div>
       {can.controlValve ? (
         <div className="mt-4 flex flex-wrap gap-2">

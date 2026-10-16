@@ -15,14 +15,13 @@ from telegram.ext import (
 from bot.api_client import ApiClient
 from bot.audit import AuditLog
 from bot.auth import LinkStore
-from bot.confirm import ConfirmStore
 from bot.config import Settings
+from bot.confirm import ConfirmStore
 from bot.deps import Deps
 from bot.handlers import callbacks, commands, queries
 from bot.poller import run_poller
 from bot.ratelimit import RateLimiter
 from bot.tools import build_default_registry
-
 
 log = logging.getLogger("bot")
 
@@ -49,7 +48,9 @@ def build_app(settings: Settings) -> Application:
     )
 
     async def post_init(app: Application) -> None:
-        app.bot_data["poller"] = asyncio.create_task(run_poller(app.bot, deps, settings.bot_poll_interval, settings.seen_path))
+        app.bot_data["poller"] = asyncio.create_task(
+            run_poller(app.bot, deps, settings.bot_poll_interval, settings.seen_path)
+        )
 
     async def post_shutdown(app: Application) -> None:
         task = app.bot_data["poller"]

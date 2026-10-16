@@ -18,6 +18,8 @@ export interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => void;
+  /** Clears the session and navigates to /login (used on 401 / WS 4401). */
+  expireSession: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -43,14 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('unauthenticated');
   }, []);
 
+  const expireSession = useCallback(() => {
+    dropSession();
+    routerRef.current.replace('/login');
+  }, [dropSession]);
+
   // 401 anywhere => clear session and bounce to /login.
   useEffect(() => {
-    setUnauthorizedHandler(() => {
-      dropSession();
-      routerRef.current.replace('/login');
-    });
+    setUnauthorizedHandler(expireSession);
     return () => setUnauthorizedHandler(null);
-  }, [dropSession]);
+  }, [expireSession]);
 
   // Restore session on first load.
   useEffect(() => {
@@ -98,8 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [dropSession]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, token, status, can: permissionsFor(user?.role), login, register, logout }),
-    [user, token, status, login, register, logout],
+    () => ({ user, token, status, can: permissionsFor(user?.role), login, register, logout, expireSession }),
+    [user, token, status, login, register, logout, expireSession],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

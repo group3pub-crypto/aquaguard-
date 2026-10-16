@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { WS_UNAUTHORIZED } from '@/lib/wsAuth';
 import type { ConnectionState } from '@/lib/types';
 
 export const BACKOFF_BASE_MS = 1000;
@@ -16,14 +17,18 @@ export interface UseWebSocketOptions {
   url: string | null;
   onMessage: (data: unknown) => void;
   maxRetries?: number;
+  /** Called when the server closes with 4401 (bad/expired token). No retry is attempted. */
+  onUnauthorized?: () => void;
 }
 
-export function useWebSocket({ url, onMessage, maxRetries = 8 }: UseWebSocketOptions): {
+export function useWebSocket({ url, onMessage, maxRetries = 8, onUnauthorized }: UseWebSocketOptions): {
   state: ConnectionState;
   reconnect: () => void;
 } {
   const handlerRef = useRef(onMessage);
   handlerRef.current = onMessage;
+  const unauthRef = useRef(onUnauthorized);
+  unauthRef.current = onUnauthorized;
   const [state, setState] = useState<ConnectionState>('idle');
   const [nonce, setNonce] = useState(0);
 
@@ -59,9 +64,15 @@ export function useWebSocket({ url, onMessage, maxRetries = 8 }: UseWebSocketOpt
       ws.onerror = () => {
         /* onclose follows; handled there */
       };
-      ws.onclose = () => {
+      ws.onclose = (ev?: CloseEvent) => {
         if (disposed || socket !== ws) return;
         socket = null;
+        if (ev?.code === WS_UNAUTHORIZED) {
+          // Retrying with the same stale token can never succeed.
+          setState('disconnected');
+          unauthRef.current?.();
+          return;
+        }
         scheduleRetry();
       };
     };

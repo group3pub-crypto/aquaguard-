@@ -39,12 +39,11 @@ function ThemeToggle() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, can, logout } = useAuth();
+  const { user, logout } = useAuth();
   const pathname = usePathname();
   const links = [
     { href: '/', label: 'Overview' },
     { href: '/alerts', label: 'Alerts' },
-    ...(can.demo ? [{ href: '/demo', label: 'Demo' }] : []),
   ];
   return (
     <>

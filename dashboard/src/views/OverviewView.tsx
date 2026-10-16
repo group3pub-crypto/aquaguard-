@@ -11,10 +11,10 @@ import type { Society, SocietyStats } from '@/lib/types';
 
 function StatBand({ stats }: { stats: SocietyStats }) {
   const items = [
-    { label: 'Total consumption', value: fmtNumber(stats.total_consumption), unit: 'L' },
-    { label: 'Losses', value: fmtNumber(stats.losses), unit: 'L' },
-    { label: 'Water saved', value: fmtNumber(stats.water_saved), unit: 'L' },
-    { label: 'Active alerts', value: String(stats.active_alerts), unit: '' },
+    { label: 'Flats', value: fmtNumber(stats.flats, 0), unit: '' },
+    { label: 'Water used (24 h)', value: fmtNumber(stats.volume_24h_l), unit: 'L' },
+    { label: 'Active alerts', value: fmtNumber(stats.active_alerts, 0), unit: '' },
+    { label: 'Sensors offline', value: fmtNumber(stats.sensors_offline, 0), unit: '' },
   ];
   return (
     <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line lg:grid-cols-4">
@@ -33,7 +33,7 @@ function StatBand({ stats }: { stats: SocietyStats }) {
 export function OverviewView() {
   const societies = usePolling<Society[]>((signal) => api.societies({ signal }), { key: 'societies' });
   const [selected, setSelected] = useState<string | null>(null);
-  const list = societies.data ?? [];
+  const list = Array.isArray(societies.data) ? societies.data : [];
   const society = list.find((s) => String(s.id) === selected) ?? list[0];
   const sid = society ? String(society.id) : '';
 
@@ -47,8 +47,8 @@ export function OverviewView() {
     intervalMs: 30_000,
     enabled: !!sid,
   });
-  const active = useAlerts({ state: 'active' });
-  const { readings } = useLive();
+  const active = useAlerts({ open: true });
+  const { readings, sensors, events } = useLive();
   const alerted = new Set((active.alerts ?? []).map((a) => String(a.flat_id)));
 
   return (
@@ -114,11 +114,25 @@ export function OverviewView() {
                 {(fs) => (
                   <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {fs.map((f) => (
-                      <FlatTile key={String(f.id)} flat={f} live={readings[String(f.id)]} hasAlert={alerted.has(String(f.id))} />
+                      <FlatTile key={String(f.id)} flat={f} live={readings[String(f.id)]} hasAlert={alerted.has(String(f.id))} sensor={sensors[String(f.id)]} />
                     ))}
                   </ul>
                 )}
               </DataState>
+            </section>
+            <section aria-labelledby="live-h">
+              <h2 id="live-h" className="mb-4 text-xl font-semibold">
+                Live activity
+              </h2>
+              {events.length === 0 ? (
+                <p className="text-sm text-ink-2">Alerts, anomalies and valve changes appear here in real time.</p>
+              ) : (
+                <ul className="space-y-1 text-sm">
+                  {events.slice(0, 10).map((e) => (
+                    <li key={e.id}>{e.text}</li>
+                  ))}
+                </ul>
+              )}
             </section>
           </>
         )}

@@ -1,3 +1,4 @@
+import { OPEN_ALERT_STATES } from './types';
 import type { Alert, ValveState } from './types';
 
 export type Tone = 'safe' | 'warn' | 'error' | 'neutral' | 'action';
@@ -19,7 +20,7 @@ export function humanize(s: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-export function severityTone(severity: string | number | null | undefined): Tone {
+export function severityTone(severity: number | string | null | undefined): Tone {
   if (typeof severity === 'number') return severity >= 0.7 ? 'error' : severity >= 0.4 ? 'warn' : 'safe';
   const s = (severity ?? '').toLowerCase();
   if (/(crit|high|severe|burst)/.test(s)) return 'error';
@@ -28,9 +29,18 @@ export function severityTone(severity: string | number | null | undefined): Tone
   return 'neutral';
 }
 
+/** 0..1 -> "82%" (backend severity/confidence are fractions). */
+export function fmtPercent(n: number | null | undefined, digits = 0): string {
+  return typeof n === 'number' && Number.isFinite(n) ? `${(n * 100).toFixed(digits)}%` : '–';
+}
+
 export function alertStateTone(state: string): Tone {
   switch (state) {
-    case 'active':
+    case 'nudge':
+      return 'action';
+    case 'alert':
+    case 'ticket':
+    case 'auto_shutoff':
       return 'error';
     case 'acknowledged':
     case 'snoozed':
@@ -44,15 +54,26 @@ export function alertStateTone(state: string): Tone {
   }
 }
 
+const STATE_LABELS: Record<string, string> = {
+  nudge: 'Nudge',
+  alert: 'Alert',
+  ticket: 'Ticket raised',
+  auto_shutoff: 'Auto shut-off',
+};
+export function alertStateLabel(state: string): string {
+  return STATE_LABELS[state] ?? humanize(state);
+}
+
 export function valveTone(v: ValveState): Tone {
   return v === 'open' ? 'safe' : v === 'closed' ? 'warn' : 'neutral';
 }
 
 export function isOpenAlert(a: Alert): boolean {
-  return a.state !== 'resolved';
+  return (OPEN_ALERT_STATES as readonly string[]).includes(String(a.state));
 }
 
-export function describeSource(source: string): string {
+export function describeSource(source: string | null | undefined): string {
+  if (!source) return 'unknown source';
   const s = source.toLowerCase();
   if (/(llm|ai|claude|gpt|model)/.test(s)) return `AI-generated (${source})`;
   if (/(template|rule|fallback)/.test(s)) return `Template (${source})`;
@@ -66,12 +87,16 @@ export function byNewest<T extends { created_at?: string; detected_at?: string }
   return tb - ta;
 }
 
-import type { Flat } from './types';
+import type { Flat, SensorStatusName } from './types';
 
-export function flatStatus(flat: Flat, hasActiveAlert: boolean): { tone: Tone; label: string } {
-  if (hasActiveAlert) return { tone: 'error', label: 'Alert' };
-  if (/(off|fail|error|lost|stale)/i.test(flat.sensor_status)) return { tone: 'warn', label: 'Sensor issue' };
+export function flatStatus(
+  flat: Flat,
+  hasOpenAlert: boolean,
+  sensor?: SensorStatusName | null,
+): { tone: Tone; label: string } {
+  if (hasOpenAlert) return { tone: 'error', label: 'Alert' };
+  if (sensor === 'offline') return { tone: 'warn', label: 'Sensor offline' };
   if (flat.valve_state === 'closed') return { tone: 'warn', label: 'Valve closed' };
-  if (/(learn|train|pending|insufficient)/i.test(flat.baseline_status)) return { tone: 'neutral', label: 'Learning' };
+  if (flat.baseline_status === 'learning') return { tone: 'neutral', label: 'Learning' };
   return { tone: 'safe', label: 'Normal' };
 }

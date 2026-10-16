@@ -8,7 +8,6 @@ from typing import Any
 
 import httpx
 
-
 FLAT_CACHE_TTL = 300.0
 
 

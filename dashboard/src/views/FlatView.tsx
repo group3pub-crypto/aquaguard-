@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { fmtNumber } from '@/lib/format';
+import { fmtNumber, fmtTime, humanize } from '@/lib/format';
+import { useLive } from '@/context/LiveProvider';
 import { useAlerts } from '@/hooks/useAlerts';
 import { useFlatData } from '@/hooks/useFlatData';
 import { AlertTimeline } from '@/components/AlertTimeline';
@@ -13,6 +14,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 export function FlatView({ flatId }: { flatId: string }) {
   const d = useFlatData(flatId);
   const alerts = useAlerts({ flat_id: flatId });
+  const { sensors } = useLive();
 
   return (
     <div className="space-y-8">
@@ -45,18 +47,34 @@ export function FlatView({ flatId }: { flatId: string }) {
                 </div>
                 <div>
                   <dt className="text-ink-2">Floor / residents</dt>
-                  <dd className="font-semibold">{flat.floor} / {flat.residents}</dd>
+                  <dd className="font-semibold">{flat.floor ?? '–'} / {flat.residents}</dd>
                 </div>
                 <div>
                   <dt className="text-ink-2">Baseline</dt>
-                  <dd><StatusBadge tone="neutral">{flat.baseline_status}</StatusBadge></dd>
+                  <dd><StatusBadge tone={flat.baseline_status === 'ready' ? 'safe' : 'neutral'}>{humanize(String(flat.baseline_status ?? 'unknown'))}</StatusBadge></dd>
                 </div>
                 <div>
                   <dt className="text-ink-2">Sensor</dt>
-                  <dd><StatusBadge tone="neutral">{flat.sensor_status}</StatusBadge></dd>
+                  <dd>
+                    {(() => {
+                      // sensor_status is an object {status,last_seen,missed_readings}; never render it directly.
+                      const status = sensors[String(flat.id)] ?? flat.sensor_status?.status ?? 'unknown';
+                      return (
+                        <>
+                          <StatusBadge tone={status === 'online' ? 'safe' : status === 'late' ? 'warn' : status === 'offline' ? 'error' : 'neutral'}>
+                            {humanize(status)}
+                          </StatusBadge>
+                          <span className="ml-2 text-xs text-ink-2">
+                            Last seen {fmtTime(flat.sensor_status?.last_seen ?? flat.last_reading_at)}
+                            {flat.sensor_status?.missed_readings ? ` · ${flat.sensor_status.missed_readings} missed` : ''}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </dd>
                 </div>
               </dl>
-              <ValveControls flatId={flat.id} valveState={d.valveState} onChanged={d.flat.refetch} />
+              <ValveControls flatId={flat.id} valveState={d.valveState} pendingCommand={d.pendingCommand} onChanged={d.flat.refetch} />
             </div>
           )}
         </DataState>
@@ -80,10 +98,10 @@ export function FlatView({ flatId }: { flatId: string }) {
         </DataState>
         {d.baseline.error ? <p className="mt-2 text-xs text-ink-2">Baseline unavailable: {d.baseline.error.message}</p> : null}
         {d.forecast.error ? <p className="mt-1 text-xs text-ink-2">Forecast unavailable: {d.forecast.error.message}</p> : null}
-        {d.forecast.data ? (
+        {d.forecast.data && !d.forecast.error ? (
           <p className="mt-1 text-xs text-ink-2">
             Forecast model {String(d.forecast.data.model_version)}
-            {d.forecast.data.mape !== null ? ` · MAPE ${fmtNumber(d.forecast.data.mape)}%` : ''}
+            {typeof d.forecast.data.mape === 'number' ? ` · MAPE ${fmtNumber(d.forecast.data.mape)}%` : ''}
           </p>
         ) : null}
       </section>

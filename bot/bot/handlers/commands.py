@@ -101,8 +101,12 @@ async def approve(update: Any, context: Any) -> None:
         await reply(update, deps, explain(exc))
         return
     deps.audit.record(
-        "link_approved", f"telegram:{uid}", target=rec["telegram_id"], username=rec["username"],
-        role=rec["role"], unit=rec["unit"],
+        "link_approved",
+        f"telegram:{uid}",
+        target=rec["telegram_id"],
+        username=rec["username"],
+        role=rec["role"],
+        unit=rec["unit"],
     )
     scope = f"flat {rec['unit']}" if rec["role"] == "resident" else "maintenance"
     await reply(update, deps, f"Approved {rec['username']} ({rec['telegram_id']}) as {scope}.")

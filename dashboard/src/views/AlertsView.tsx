@@ -1,26 +1,29 @@
 'use client';
 import { useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { byNewest, humanize } from '@/lib/format';
+import { alertStateLabel, byNewest, isOpenAlert } from '@/lib/format';
 import { useAlerts } from '@/hooks/useAlerts';
 import { AlertRow } from '@/components/AlertRow';
 import { DataState } from '@/components/States';
 
-const TABS = ['all', 'active', 'acknowledged', 'snoozed', 'overridden', 'resolved'] as const;
+// 'open' is client-side (backend OPEN_STATES); the rest are real backend alert states.
+const TABS = ['open', 'nudge', 'alert', 'ticket', 'auto_shutoff', 'acknowledged', 'snoozed', 'overridden', 'resolved', 'all'] as const;
+const tabLabel = (t: Tab) => (t === 'open' ? 'Open' : t === 'all' ? 'All' : alertStateLabel(t));
 type Tab = (typeof TABS)[number];
 
 export function AlertsView() {
   const uid = useId();
   const { alerts, loading, error, refetch } = useAlerts({});
-  const [tab, setTab] = useState<Tab>('active');
+  const [tab, setTab] = useState<Tab>('open');
   const [tier, setTier] = useState('all');
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const all = alerts ?? [];
+  const all = Array.isArray(alerts) ? alerts : [];
   const tiers = [...new Set(all.map((a) => String(a.tier)))].sort();
   const inTier = all.filter((a) => tier === 'all' || String(a.tier) === tier);
-  const count = (t: Tab) => inTier.filter((a) => t === 'all' || a.state === t).length;
-  const visible = inTier.filter((a) => tab === 'all' || a.state === tab).sort(byNewest);
+  const inTab = (a: (typeof all)[number], t: Tab) => t === 'all' || (t === 'open' ? isOpenAlert(a) : a.state === t);
+  const count = (t: Tab) => inTier.filter((a) => inTab(a, t)).length;
+  const visible = inTier.filter((a) => inTab(a, tab)).sort(byNewest);
 
   const onKeyDown = (e: KeyboardEvent, i: number) => {
     let n = i;
@@ -80,7 +83,7 @@ export function AlertsView() {
                 selected ? 'border-action text-action' : 'border-transparent text-ink-2 hover:text-ink'
               }`}
             >
-              {humanize(t)} <span className="ml-1 text-xs text-ink-2">{count(t)}</span>
+              {tabLabel(t)} <span className="ml-1 text-xs text-ink-2">{count(t)}</span>
             </button>
           );
         })}
@@ -93,7 +96,7 @@ export function AlertsView() {
           error={error}
           onRetry={refetch}
           isEmpty={() => visible.length === 0}
-          emptyTitle={`No ${tab === 'all' ? '' : `${tab} `}alerts`}
+          emptyTitle={`No ${tab === 'all' ? '' : `${tabLabel(tab).toLowerCase()} `}alerts`}
           emptyHint="Nothing to show for this filter."
           loadingLabel="Loading alerts"
         >

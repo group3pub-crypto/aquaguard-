@@ -1,10 +1,17 @@
 'use client';
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { WS_URL } from '@/lib/api';
 import { parseWsMessage } from '@/lib/guards';
+import { buildWsUrl } from '@/lib/wsAuth';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import type { Alert, ConnectionState, ValveState } from '@/lib/types';
+import type {
+  Alert,
+  AnomalyMessage,
+  ConnectionState,
+  SensorStatusName,
+  ValveCommandRecord,
+  ValveState,
+} from '@/lib/types';
 import { useAuth } from './AuthProvider';
 
 export interface LiveReading {
@@ -14,7 +21,7 @@ export interface LiveReading {
 export interface LiveEvent {
   id: number;
   at: string;
-  kind: 'alert' | 'valve' | 'info';
+  kind: 'alert' | 'valve' | 'anomaly' | 'sensor' | 'info';
   text: string;
 }
 
@@ -22,7 +29,11 @@ export interface LiveValue {
   connection: ConnectionState;
   readings: Record<string, LiveReading[]>;
   valves: Record<string, ValveState>;
+  /** Latest valve command per flat (from {type:'valve',event:'command'}). */
+  valveCommands: Record<string, ValveCommandRecord>;
+  sensors: Record<string, SensorStatusName>;
   lastAlert: Alert | null;
+  lastAnomaly: AnomalyMessage | null;
   events: LiveEvent[];
   reconnect: () => void;
   log: (text: string) => void;
@@ -35,7 +46,10 @@ const defaultValue: LiveValue = {
   connection: 'idle',
   readings: {},
   valves: {},
+  valveCommands: {},
+  sensors: {},
   lastAlert: null,
+  lastAnomaly: null,
   events: [],
   reconnect: () => undefined,
   log: () => undefined,
@@ -49,10 +63,13 @@ export function useLive(): LiveValue {
 let eventSeq = 0;
 
 export function LiveProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, expireSession } = useAuth();
   const [readings, setReadings] = useState<Record<string, LiveReading[]>>({});
   const [valves, setValves] = useState<Record<string, ValveState>>({});
+  const [valveCommands, setValveCommands] = useState<Record<string, ValveCommandRecord>>({});
+  const [sensors, setSensors] = useState<Record<string, SensorStatusName>>({});
   const [lastAlert, setLastAlert] = useState<Alert | null>(null);
+  const [lastAnomaly, setLastAnomaly] = useState<AnomalyMessage | null>(null);
   const [events, setEvents] = useState<LiveEvent[]>([]);
 
   const pushEvent = useCallback((kind: LiveEvent['kind'], text: string) => {
@@ -78,31 +95,53 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         }
         case 'alert':
           setLastAlert(msg.alert);
-          pushEvent('alert', `Alert ${msg.alert.id} on flat ${msg.alert.flat_id}: ${msg.alert.state} - ${msg.alert.message}`);
+          pushEvent(
+            'alert',
+            `Alert on flat ${msg.alert.flat_id}: ${msg.alert.state}${msg.alert.message ? ` - ${msg.alert.message}` : ''}`,
+          );
           break;
         case 'valve':
-          setValves((prev) => ({ ...prev, [String(msg.flat_id)]: msg.state }));
-          pushEvent('valve', `Valve on flat ${msg.flat_id} is now ${msg.state}`);
+          if (msg.event === 'command') {
+            const c = msg.command;
+            setValveCommands((prev) => ({ ...prev, [String(c.flat_id)]: c }));
+            pushEvent('valve', `Valve ${c.command} command ${c.status} for flat ${c.flat_id}`);
+          } else {
+            setValves((prev) => ({ ...prev, [String(msg.flat_id)]: msg.state }));
+            pushEvent('valve', `Valve on flat ${msg.flat_id} is now ${msg.state}`);
+          }
           break;
+        case 'anomaly':
+          setLastAnomaly(msg);
+          pushEvent('anomaly', `Anomaly (${msg.anomaly_type}) detected on flat ${msg.flat_id}`);
+          break;
+        case 'sensor':
+          setSensors((prev) => ({ ...prev, [String(msg.flat_id)]: msg.status }));
+          pushEvent('sensor', `Sensor on flat ${msg.flat_id} is ${msg.status}`);
+          break;
+        default:
+          break; // unknown types are rejected by parseWsMessage and never reach here
       }
     },
     [pushEvent],
   );
 
-  const url = token ? `${WS_URL}/api/v1/ws/live?token=${encodeURIComponent(token)}` : null;
-  const { state, reconnect } = useWebSocket({ url, onMessage });
+  const url = buildWsUrl(token);
+  const { state, reconnect } = useWebSocket({ url, onMessage, onUnauthorized: expireSession });
 
   const value = useMemo<LiveValue>(
     () => ({
       connection: state,
       readings,
       valves,
+      valveCommands,
+      sensors,
       lastAlert,
+      lastAnomaly,
       events,
       reconnect,
       log: (text: string) => pushEvent('info', text),
     }),
-    [state, readings, valves, lastAlert, events, reconnect, pushEvent],
+    [state, readings, valves, valveCommands, sensors, lastAlert, lastAnomaly, events, reconnect, pushEvent],
   );
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

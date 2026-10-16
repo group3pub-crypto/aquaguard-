@@ -2,14 +2,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { alertStateTone, describeSource, fmtTime, humanize } from '@/lib/format';
+import { canTransition } from '@/lib/alertActions';
+import { alertStateLabel, alertStateTone, describeSource, fmtNumber, fmtTime, isOpenAlert } from '@/lib/format';
 import { useAuth } from '@/context/AuthProvider';
 import { useAction } from '@/hooks/useAction';
 import type { Alert } from '@/lib/types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StatusBadge } from './StatusBadge';
 
-const SNOOZE_OPTIONS = [15, 30, 60, 120];
+const SNOOZE_OPTIONS = [15, 30, 60, 120] as const;
 
 export function AlertRow({
   alert,
@@ -22,11 +23,11 @@ export function AlertRow({
 }) {
   const { user, can } = useAuth();
   const { busy, error, run, clearError } = useAction();
-  const [snooze, setSnooze] = useState(30);
+  const [snooze, setSnooze] = useState<(typeof SNOOZE_OPTIONS)[number]>(30);
   const [overriding, setOverriding] = useState(false);
   const who = user?.username ?? '';
-  const open = alert.state !== 'resolved';
-  const active = alert.state === 'active';
+  const state = String(alert.state);
+  const open = isOpenAlert(alert);
 
   const act = async (fn: () => Promise<unknown>) => {
     if (!user) return false;
@@ -38,7 +39,7 @@ export function AlertRow({
   return (
     <li className="rounded-lg border border-line bg-canvas p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge tone={alertStateTone(String(alert.state))}>{humanize(String(alert.state))}</StatusBadge>
+        <StatusBadge tone={alertStateTone(state)}>{alertStateLabel(state)}</StatusBadge>
         <StatusBadge tone="neutral">Tier {String(alert.tier)}</StatusBadge>
         {showFlatLink ? (
           <Link href={`/flat/${encodeURIComponent(String(alert.flat_id))}`} className="text-sm font-semibold text-action">
@@ -49,24 +50,24 @@ export function AlertRow({
           {fmtTime(alert.created_at)}
         </time>
       </div>
-      <p className="mt-3">{alert.message}</p>
+      <p className="mt-3">{alert.message ?? 'No message provided.'}</p>
       <p className="mt-1 text-xs text-ink-2">
-        Severity {alert.severity_score.toFixed(2)} · Message: {describeSource(alert.message_source)}
+        Severity {fmtNumber(alert.severity_score, 2)} · Message: {describeSource(alert.message_source)}
       </p>
 
       {open ? (
         <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Alert actions">
-          {can.acknowledge && active ? (
+          {can.acknowledge && canTransition('acknowledge', state) ? (
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act(() => api.acknowledge(alert.id, { acknowledged_by: who }))}>
               Acknowledge
             </button>
           ) : null}
-          {can.snooze && alert.state !== 'snoozed' ? (
+          {can.snooze && canTransition('snooze', state) ? (
             <span className="inline-flex items-center gap-1">
               <label className="sr-only" htmlFor={`snooze-${alert.id}`}>
                 Snooze duration
               </label>
-              <select id={`snooze-${alert.id}`} className="field !min-h-[40px] !w-auto" value={snooze} onChange={(e) => setSnooze(Number(e.target.value))}>
+              <select id={`snooze-${alert.id}`} className="field !min-h-[40px] !w-auto" value={snooze} onChange={(e) => setSnooze(Number(e.target.value) as (typeof SNOOZE_OPTIONS)[number])}>
                 {SNOOZE_OPTIONS.map((m) => (
                   <option key={m} value={m}>
                     {m} min
@@ -78,12 +79,12 @@ export function AlertRow({
               </button>
             </span>
           ) : null}
-          {can.resolve ? (
+          {can.resolve && canTransition('resolve', state) ? (
             <button type="button" className="btn" disabled={busy} onClick={() => void act(() => api.resolve(alert.id, { resolved_by: who }))}>
               Resolve
             </button>
           ) : null}
-          {can.override ? (
+          {can.override && canTransition('override', state) ? (
             <button
               type="button"
               className="btn"

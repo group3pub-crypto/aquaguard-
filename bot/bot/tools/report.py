@@ -43,6 +43,11 @@ def register(reg: ToolRegistry) -> None:
         )
     )
     reg.register(
-        Tool("system_status", "Society-wide counts: flats, active alerts, 24 h volume, offline sensors.", empty,
-             system_status, Role.MAINTENANCE)
+        Tool(
+            "system_status",
+            "Society-wide counts: flats, active alerts, 24 h volume, offline sensors.",
+            empty,
+            system_status,
+            Role.MAINTENANCE,
+        )
     )

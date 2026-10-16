@@ -31,33 +31,81 @@ AN = "cccccccc-0000-4000-8000-000000000001"
 ADMIN, RES, MAINT, STRANGER = 1, 2, 3, 4
 
 FLATS = [
-    {"id": F101, "society_id": SOC, "unit_number": "A-101", "floor": 1, "residents": 3,
-     "sensor_id": "esp-101", "valve_state": "open", "baseline_status": "ready"},
-    {"id": F102, "society_id": SOC, "unit_number": "A-102", "floor": 1, "residents": 2,
-     "sensor_id": "esp-102", "valve_state": "open", "baseline_status": "ready"},
+    {
+        "id": F101,
+        "society_id": SOC,
+        "unit_number": "A-101",
+        "floor": 1,
+        "residents": 3,
+        "sensor_id": "esp-101",
+        "valve_state": "open",
+        "baseline_status": "ready",
+    },
+    {
+        "id": F102,
+        "society_id": SOC,
+        "unit_number": "A-102",
+        "floor": 1,
+        "residents": 2,
+        "sensor_id": "esp-102",
+        "valve_state": "open",
+        "baseline_status": "ready",
+    },
 ]
-SOCIETIES = [{"id": SOC, "name": "Towers", "slug": "towers", "address": None,
-              "total_flats": 2, "created_at": "2026-01-01T00:00:00Z"}]
+SOCIETIES = [
+    {
+        "id": SOC,
+        "name": "Towers",
+        "slug": "towers",
+        "address": None,
+        "total_flats": 2,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+]
 
 
 def alert(aid: str, flat: str, state: str, tier: int = 2, msg: str | None = "Possible leak") -> dict:
     return {
-        "id": aid, "flat_id": flat, "anomaly_id": AN, "state": state, "tier": tier,
-        "severity_score": 0.72, "message": msg, "message_source": "template", "escalated_at": [],
-        "snoozed_until": None, "acknowledged_by": None, "acknowledged_at": None, "resolved_at": None,
-        "created_at": "2026-10-16T10:00:00Z", "updated_at": "2026-10-16T10:00:00Z",
+        "id": aid,
+        "flat_id": flat,
+        "anomaly_id": AN,
+        "state": state,
+        "tier": tier,
+        "severity_score": 0.72,
+        "message": msg,
+        "message_source": "template",
+        "escalated_at": [],
+        "snoozed_until": None,
+        "acknowledged_by": None,
+        "acknowledged_at": None,
+        "resolved_at": None,
+        "created_at": "2026-10-16T10:00:00Z",
+        "updated_at": "2026-10-16T10:00:00Z",
     }
 
 
 USAGE = {"flat_id": F101, "hours": 24, "volume_l": 312.46, "avg_lpm": 0.217, "expected_l": 280.0}
-LOSSES = {"society_id": SOC, "days": 7,
-          "losses": [{"flat_id": F101, "unit": "A-101", "estimated_loss_l": 40.04},
-                     {"flat_id": F102, "unit": "A-102", "estimated_loss_l": 12.0}]}
+LOSSES = {
+    "society_id": SOC,
+    "days": 7,
+    "losses": [
+        {"flat_id": F101, "unit": "A-101", "estimated_loss_l": 40.04},
+        {"flat_id": F102, "unit": "A-102", "estimated_loss_l": 12.0},
+    ],
+}
 REPORT_MD = "# Weekly water report: Towers\n_2026-10-09 to 2026-10-16_\n\n## Summary\n- Flats monitored: 2\n"
 STATS = {"society_id": SOC, "flats": 2, "active_alerts": 3, "volume_24h_l": 910.5, "sensors_offline": 1}
-VALVE_CMD = {"id": AL1, "flat_id": F101, "alert_id": None, "command": "close", "source": "manual_bot",
-             "issued_by": "telegram:1", "issued_at": "2026-10-16T10:00:00Z", "confirmed_at": None,
-             "status": "pending"}
+VALVE_CMD = {
+    "id": AL1,
+    "flat_id": F101,
+    "alert_id": None,
+    "command": "close",
+    "source": "manual_bot",
+    "issued_by": "telegram:1",
+    "issued_at": "2026-10-16T10:00:00Z",
+    "confirmed_at": None,
+    "status": "pending",
+}
 
 
 # --- openapi helpers ---------------------------------------------------------
@@ -108,8 +156,13 @@ def check_request(method: str, path: str, query: dict[str, str], body: Any) -> N
 def check_response(method: str, path: str, payload: Any) -> None:
     """Fixture keys must be a subset of the response model's properties (when it has one)."""
     op = operation(method, path)
-    schema = op["responses"].get("200", op["responses"].get("201", {})).get("content", {}) \
-        .get("application/json", {}).get("schema")
+    schema = (
+        op["responses"]
+        .get("200", op["responses"].get("201", {}))
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema")
+    )
     if not schema or schema == {}:
         return  # tools endpoints declare no response model
     if schema.get("type") == "array":
@@ -142,13 +195,20 @@ class BackendSim:
         elif p == "/api/v1/flats":
             out = FLATS
         elif p == "/api/v1/alerts":
-            out = [a for a in self.alerts if (not query.get("state") or a["state"] == query["state"])
-                   and (not query.get("flat_id") or a["flat_id"] == query["flat_id"])]
+            out = [
+                a
+                for a in self.alerts
+                if (not query.get("state") or a["state"] == query["state"])
+                and (not query.get("flat_id") or a["flat_id"] == query["flat_id"])
+            ]
         elif p == "/api/v1/tools/active-alerts":
             ids = [body["flat_id"]] if body.get("flat_id") else None
-            al = [a for a in self.alerts if a["state"] in ("nudge", "alert", "ticket", "auto_shutoff",
-                                                           "acknowledged", "snoozed")
-                  and (ids is None or a["flat_id"] in ids)]
+            al = [
+                a
+                for a in self.alerts
+                if a["state"] in ("nudge", "alert", "ticket", "auto_shutoff", "acknowledged", "snoozed")
+                and (ids is None or a["flat_id"] in ids)
+            ]
             out = {"count": len(al), "alerts": al}
         elif p == "/api/v1/tools/flat-usage":
             out = USAGE
@@ -174,8 +234,14 @@ def make_deps(api: Any, tmp_path: Path | None = None) -> Deps:
     store = LinkStore({ADMIN}, str(tmp_path / "links.json") if tmp_path else None)
     store.links[RES] = {"username": "res", "chat_id": 20, "role": "resident", "flat_id": F101, "unit": "A-101"}
     store.links[MAINT] = {"username": "maint", "chat_id": 30, "role": "maintenance", "flat_id": None, "unit": None}
-    return Deps(api=api, registry=build_default_registry(), store=store, limiter=RateLimiter(1000),
-                audit=AuditLog(str(tmp_path / "audit.jsonl") if tmp_path else None), confirm=ConfirmStore())
+    return Deps(
+        api=api,
+        registry=build_default_registry(),
+        store=store,
+        limiter=RateLimiter(1000),
+        audit=AuditLog(str(tmp_path / "audit.jsonl") if tmp_path else None),
+        confirm=ConfirmStore(),
+    )
 
 
 def ctx(deps: Deps, args: list[str] | None = None) -> SimpleNamespace:
@@ -185,8 +251,9 @@ def ctx(deps: Deps, args: list[str] | None = None) -> SimpleNamespace:
 
 def upd(uid: int, text: str = "") -> SimpleNamespace:
     msg = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=500)), text=text)
-    return SimpleNamespace(effective_user=SimpleNamespace(id=uid), effective_chat=SimpleNamespace(id=uid),
-                           effective_message=msg)
+    return SimpleNamespace(
+        effective_user=SimpleNamespace(id=uid), effective_chat=SimpleNamespace(id=uid), effective_message=msg
+    )
 
 
 __all__ = ["Role"]
