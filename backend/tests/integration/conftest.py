@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
-from app.seed import seed_demo
 from sqlalchemy import text
 
 from alembic import command
 from app.database import Database
 from app.main import create_app
+from app.models import Flat, Society
 from app.rate_limit import limiter
 from tests.conftest import FakePublisher, make_settings
 
@@ -98,7 +98,23 @@ def rt(make_app):
     return make_app().state.rt
 
 
+UNITS = ("101", "102", "201", "202", "301", "302")
+
+
 @pytest.fixture
-async def society(pgdb, rt):
+async def society(pgdb) -> Society:
+    """Society 'green-valley' with six flats, created directly (independent of seed code)."""
     async with pgdb.session() as s:
-        return await seed_demo(s, rt.settings)
+        soc = Society(name="Green Valley", slug="green-valley", total_flats=len(UNITS))
+        s.add(soc)
+        await s.flush()
+        s.add_all(
+            Flat(
+                society_id=soc.id,
+                unit_number=u,
+                sensor_id=f"green-valley-{u}",
+                baseline_status="ready",  # "learning" flats cap alerts at tier 2
+            )
+            for u in UNITS
+        )
+    return soc
