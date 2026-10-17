@@ -1,17 +1,19 @@
 import { getConfig } from './config';
+import { api } from './api';
 
 /**
  * The ONLY place that knows how the WebSocket authenticates.
  *
- * Today the backend accepts the JWT as a `?token=` query parameter on /api/v1/ws/live.
- * That puts the token in URLs (proxy/access logs). The backend will later offer a
- * short-lived ticket; switching then means changing just this function (e.g. fetch a
- * ticket with api.* and return `?ticket=...`, making this async).
+ * The backend issues a single-use, 30 s ticket (POST /api/v1/auth/ws-ticket) and connects
+ * with `/api/v1/ws/live?ticket=...`; it does NOT accept the JWT itself (that would put it in
+ * URLs/access logs). A fresh ticket must be fetched for every connection attempt, including
+ * reconnects, since a ticket cannot be reused.
  */
-export function buildWsUrl(token: string | null): string | null {
-  if (!token) return null;
-  return `${getConfig().wsUrl}/api/v1/ws/live?token=${encodeURIComponent(token)}`;
+export async function buildWsUrl(authenticated: boolean): Promise<string | null> {
+  if (!authenticated) return null;
+  const { ticket } = await api.wsTicket();
+  return `${getConfig().wsUrl}/api/v1/ws/live?ticket=${encodeURIComponent(ticket)}`;
 }
 
-/** Close code the backend uses for a missing/invalid/expired token (routers/ws.py). */
+/** Close code the backend uses for a missing/invalid/expired ticket (routers/ws.py). */
 export const WS_UNAUTHORIZED = 4401;

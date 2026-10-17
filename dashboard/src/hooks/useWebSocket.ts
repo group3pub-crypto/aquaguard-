@@ -13,15 +13,23 @@ export function backoffDelay(attempt: number, random: number = Math.random()): n
 }
 
 export interface UseWebSocketOptions {
-  /** null/empty url pauses the connection (e.g. no token yet). */
-  url: string | null;
+  /** Resolves the connect URL fresh for every attempt (tickets are single-use); false/idle
+   * pauses the connection (e.g. not authenticated yet). Return null to skip this attempt. */
+  getUrl: () => Promise<string | null>;
+  enabled: boolean;
   onMessage: (data: unknown) => void;
   maxRetries?: number;
-  /** Called when the server closes with 4401 (bad/expired token). No retry is attempted. */
+  /** Called when the server closes with 4401 (bad/expired ticket). No retry is attempted. */
   onUnauthorized?: () => void;
 }
 
-export function useWebSocket({ url, onMessage, maxRetries = 8, onUnauthorized }: UseWebSocketOptions): {
+export function useWebSocket({
+  getUrl,
+  enabled,
+  onMessage,
+  maxRetries = 8,
+  onUnauthorized,
+}: UseWebSocketOptions): {
   state: ConnectionState;
   reconnect: () => void;
 } {
@@ -29,11 +37,13 @@ export function useWebSocket({ url, onMessage, maxRetries = 8, onUnauthorized }:
   handlerRef.current = onMessage;
   const unauthRef = useRef(onUnauthorized);
   unauthRef.current = onUnauthorized;
+  const getUrlRef = useRef(getUrl);
+  getUrlRef.current = getUrl;
   const [state, setState] = useState<ConnectionState>('idle');
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
-    if (!url) {
+    if (!enabled) {
       setState('idle');
       return;
     }
@@ -42,9 +52,21 @@ export function useWebSocket({ url, onMessage, maxRetries = 8, onUnauthorized }:
     let socket: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const connect = () => {
+    const connect = async () => {
       if (disposed) return;
       setState(attempt === 0 ? 'connecting' : 'reconnecting');
+      let url: string | null;
+      try {
+        url = await getUrlRef.current();
+      } catch {
+        scheduleRetry();
+        return;
+      }
+      if (disposed) return;
+      if (!url) {
+        setState('idle');
+        return;
+      }
       let ws: WebSocket;
       try {
         ws = new WebSocket(url);
@@ -98,7 +120,7 @@ export function useWebSocket({ url, onMessage, maxRetries = 8, onUnauthorized }:
         socket.close();
       }
     };
-  }, [url, maxRetries, nonce]);
+  }, [enabled, maxRetries, nonce]);
 
   const reconnect = useCallback(() => setNonce((n) => n + 1), []);
   return { state, reconnect };

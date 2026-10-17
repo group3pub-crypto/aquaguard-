@@ -125,8 +125,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [pushEvent],
   );
 
-  const url = buildWsUrl(token);
-  const { state, reconnect } = useWebSocket({ url, onMessage, onUnauthorized: expireSession });
+  const authenticated = token != null;
+  const getUrl = useCallback(() => buildWsUrl(authenticated), [authenticated]);
+  const { state, reconnect } = useWebSocket({
+    getUrl,
+    enabled: authenticated,
+    onMessage,
+    onUnauthorized: expireSession,
+  });
 
   const value = useMemo<LiveValue>(
     () => ({

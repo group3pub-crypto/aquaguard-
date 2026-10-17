@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LiveProvider, useLive } from './LiveProvider';
-import { WithAuth } from '@/test/utils';
+import { WithAuth, mockFetch } from '@/test/utils';
 import { IDS, wsFrames } from '@/test/fixtures';
 import { setToken } from '@/lib/session';
 import { buildWsUrl } from '@/lib/wsAuth';
@@ -35,17 +35,21 @@ beforeEach(() => {
   MockWS.instances = [];
   vi.stubGlobal('WebSocket', MockWS);
   setToken('jwt-abc');
+  mockFetch((url) =>
+    url.pathname.endsWith('/auth/ws-ticket') ? { body: { ticket: 'tkt-123', expires_in: 30 } } : undefined,
+  );
 });
 
 const send = (obj: unknown) => act(() => MockWS.instances[0]?.onmessage?.({ data: JSON.stringify(obj) }));
+const flush = () => act(() => Promise.resolve());
 
 describe('LiveProvider', () => {
-  it('builds the WS url in one place, token as query param', () => {
-    expect(buildWsUrl('a b')).toContain('/api/v1/ws/live?token=a%20b');
-    expect(buildWsUrl(null)).toBeNull();
+  it('builds the WS url in one place, a single-use ticket as query param', async () => {
+    await expect(buildWsUrl(true)).resolves.toContain('/api/v1/ws/live?ticket=tkt-123');
+    await expect(buildWsUrl(false)).resolves.toBeNull();
   });
 
-  it('handles every real frame type and ignores unknown ones', () => {
+  it('handles every real frame type and ignores unknown ones', async () => {
     render(
       <WithAuth role="admin">
         <LiveProvider>
@@ -53,7 +57,8 @@ describe('LiveProvider', () => {
         </LiveProvider>
       </WithAuth>,
     );
-    expect(MockWS.instances[0]?.url).toContain('token=tok');
+    await flush();
+    expect(MockWS.instances[0]?.url).toContain('ticket=tkt-123');
     send(wsFrames.reading);
     expect(screen.getByTestId('flow')).toHaveTextContent('1');
     send(wsFrames.valveCommand);
