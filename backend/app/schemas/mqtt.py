@@ -24,8 +24,8 @@ class FlowPayload(BaseModel):
     tmp: float | None = Field(None, ge=-50, le=150)
     bat: int | None = Field(None, ge=0, le=100)  # percent; decimals (99.9) are rounded
     rssi: int | None = Field(None, ge=-150, le=0)
-    # Optional firmware extras. They are VALIDATED here; the ingest service will persist them in
-    # a later change (until then they are accepted and dropped). Unknown keys stay ignored.
+    # Optional firmware extras, persisted by the ingest service (see FlowReading). Unknown keys
+    # stay ignored.
     tot: float | None = Field(None, ge=0, le=1e9)  # cumulative litres
     vbat: float | None = Field(None, ge=2.5, le=4.5)  # battery volts
     valve: Literal["open", "closed"] | None = None  # valve position seen by the device

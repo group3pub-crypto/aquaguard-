@@ -173,6 +173,11 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
             "rssi": data.rssi,
             "message_id": data.id.lower(),
             "received_at": now,
+            "total_volume": data.tot,
+            "battery_volts": data.vbat,
+            "device_valve_state": data.valve,
+            "firmware_version": data.fw,
+            "fault_codes": data.err,
         }
         if rt.batcher is None:
             rt.batcher = ReadingBatcher(rt)

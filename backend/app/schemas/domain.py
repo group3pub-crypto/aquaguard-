@@ -59,6 +59,11 @@ class ReadingOut(ORM):
     temperature: float | None = None
     battery_pct: int | None = None
     rssi: int | None = None
+    total_volume: float | None = None
+    battery_volts: float | None = None
+    device_valve_state: str | None = None
+    firmware_version: str | None = None
+    fault_codes: list[str] | None = None
 
 
 class BaselineOut(ORM):

@@ -30,6 +30,7 @@ MAX_WAIT_S = 0.02
 READING_COLUMNS = (
     "flat_id", "timestamp", "flow_rate", "volume", "pressure", "temperature",
     "battery_pct", "rssi", "message_id", "received_at",
+    "total_volume", "battery_volts", "device_valve_state", "firmware_version", "fault_codes",
 )  # fmt: skip
 
 

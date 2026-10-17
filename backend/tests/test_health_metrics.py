@@ -289,5 +289,5 @@ def test_dev_bootstrap_script_uses_the_cli_and_never_puts_a_password_in_argv():
     assert (BACKEND / "scripts/dev_bootstrap.sh").stat().st_mode & 0o111
 
 
-def test_migration_0002_is_head_and_chains_from_0001():
-    assert head_revision() == "0002"
+def test_migration_0003_is_head_and_chains_from_0001():
+    assert head_revision() == "0003"
