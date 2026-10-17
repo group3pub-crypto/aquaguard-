@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from bot.auth import Role, role_allows
 from bot.deps import Deps, explain, get_deps
+from bot.tools.alerts import acted_by
+
+OVERRIDE_REASON = "Override requested via Telegram bot"
 
 _NLU_TOOLS = {"acknowledge_alert", "snooze_alert", "resolve_alert"}
 _ALERT_TOOLS = {"ack": "acknowledge_alert", "snooze": "snooze_alert", "resolve": "resolve_alert"}
@@ -53,6 +57,13 @@ async def dispatch(
             text = await deps.registry.call(tool, args, principal, deps.api)  # role re-checked here
             deps.audit.record("nlu_confirmed", principal.actor if principal else f"telegram:{uid}", tool=tool, **args)
             return text
+        elif kind == "alert" and len(parts) == 3 and parts[1] == "override":
+            # not a registry tool on purpose: smart mode must never be able to propose it
+            if not role_allows(principal.role if principal else None, Role.ADMIN):
+                return "You are not allowed to do that."
+            resp = await deps.api.override_alert(parts[2], OVERRIDE_REASON, principal.on_behalf_of)
+            deps.audit.record("alert_override", principal.actor, alert_id=parts[2])
+            return f"Alert {parts[2]} overridden: the pending automatic shut-off is cancelled.{acted_by(resp)}"
         elif kind == "alert" and len(parts) == 3 and parts[1] in _ALERT_TOOLS:
             args = {"alert_id": parts[2]}
             if parts[1] == "snooze":

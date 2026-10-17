@@ -2,13 +2,32 @@
 
 > **SYNTHETIC DATA ONLY.** Every number below comes from the simulator in `ml/scripts/generate_data.py` (and, where labelled, an *assumed* YF-S201 sensor model). No real household, sensor, plumbing fault or operator label was involved. Read the 'What this does NOT show' section before quoting anything.
 
-- Run: 2026-10-17 01:07 UTC | seed 42 | sklearn 1.9.1 | 40 flats x 60 days | window 15 min, stride 5 min | bootstrap resamples 2000 | debounce = 3 consecutive flagged windows
+- Run: 2026-10-17 01:16 UTC | seed 42 | sklearn 1.9.1 | 40 flats x 60 days | window 15 min, stride 5 min | bootstrap resamples 2000 | debounce = 3 consecutive flagged windows
 - Rule baseline loaded from `backend/app/services/detector.py` (sha256 `ba79e818b92d81d2`), mode: ast extraction of classify_anomaly_rules/Detection (same source file). The `ml` package does not import the backend; only this dev script does, so the baseline is the code that ships.
-- Time: 430 s. Reproduce: `python -m ml.scripts.benchmark --flats 40 --days 60 --seed 42`.
+- Time: 500 s. Reproduce: `python -m ml.scripts.benchmark --flats 40 --days 60 --seed 42`.
 
 ## 1. Verdict (read this first)
 
 Rule: a model is called better than the best simple baseline on a metric only if the paired bootstrap difference is significant after Holm correction across the metrics (adjusted p < 0.05); otherwise the result is **not demonstrated**. The 'best simple baseline' is picked per metric among (a)-(d) using the TEST point estimate, which favours the baseline (conservative for ML).
+
+Headline (point values; verdict is 'better'/'worse' only after Holm correction, else 'not demonstrated'):
+
+| condition | model | compared with | leak+burst episode detection | false alarms / flat-week | macro-F1 |
+|---|---|---|---|---|---|
+| default | (e) full RandomForest | best simple baseline per metric | 1.000 vs 1.000: **not demonstrated** | 4.35 vs 0.00: **worse** | 0.952 vs 0.716: **better** |
+| default | (f) hybrid: rules gate + ML | best simple baseline per metric | 0.994 vs 1.000: **not demonstrated** | 1.20 vs 0.00: **worse** | 0.779 vs 0.716: **better** |
+| default | (e) full RandomForest | best overall: (b) tree on min_flow | 1.000 vs 0.981: **not demonstrated** | 4.35 vs 0.55: **worse** | 0.952 vs 0.716: **better** |
+| default | (f) hybrid: rules gate + ML | best overall: (b) tree on min_flow | 0.994 vs 0.981: **not demonstrated** | 1.20 vs 0.55: **worse** | 0.779 vs 0.716: **better** |
+| default | (e) full RandomForest | production rules (a) | 1.000 vs 0.994: **not demonstrated** | 4.35 vs 11.63: **better** | 0.952 vs 0.685: **better** |
+| default | (f) hybrid: rules gate + ML | production rules (a) | 0.994 vs 0.994: **not demonstrated** | 1.20 vs 11.63: **better** | 0.779 vs 0.685: **better** |
+| shifted+yfs201 | (e) full RandomForest | best simple baseline per metric | 1.000 vs 0.891: **better** | 109.91 vs 0.11: **worse** | 0.645 vs 0.536: **better** |
+| shifted+yfs201 | (f) hybrid: rules gate + ML | best simple baseline per metric | 0.721 vs 0.891: **worse** | 7.19 vs 0.11: **worse** | 0.631 vs 0.536: **better** |
+| shifted+yfs201 | (e) full RandomForest | best overall: (d) IsolationForest alone | 1.000 vs 0.891: **better** | 109.91 vs 23.51: **worse** | n/a |
+| shifted+yfs201 | (f) hybrid: rules gate + ML | best overall: (d) IsolationForest alone | 0.721 vs 0.891: **worse** | 7.19 vs 23.51: **better** | n/a |
+| shifted+yfs201 | (e) full RandomForest | production rules (a) | 1.000 vs 0.822: **better** | 109.91 vs 10.55: **worse** | 0.645 vs 0.534: **better** |
+| shifted+yfs201 | (f) hybrid: rules gate + ML | production rules (a) | 0.721 vs 0.822: **worse** | 7.19 vs 10.55: **better** | 0.631 vs 0.534: **better** |
+
+Full per-metric verdicts:
 
 **Versus the best simple baseline, picked per metric** (an oracle: the best of (a)-(d) on each metric separately, e.g. `night_min_flow` rules win false alarms only by almost never alerting):
 

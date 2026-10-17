@@ -13,8 +13,22 @@
         "type": "null"
        }
       ],
-      "description": "Ignored; actor is the caller",
+      "deprecated": true,
+      "description": "Ignored; the actor is the caller",
       "title": "Acknowledged By"
+     },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Service accounts only: end user the action is performed for. Recorded in the audit trail as asserted, not verified. Other callers get 422.",
+      "title": "On Behalf Of"
      }
     },
     "title": "AcknowledgeRequest",
@@ -55,6 +69,190 @@
      }
     },
     "title": "ActiveAlertsRequest",
+    "type": "object"
+   },
+   "AlertActionOut": {
+    "properties": {
+     "acknowledged_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Acknowledged At"
+     },
+     "acknowledged_by": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Acknowledged By"
+     },
+     "anomaly_id": {
+      "format": "uuid",
+      "title": "Anomaly Id",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "escalated_at": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Escalated At"
+     },
+     "flat_id": {
+      "format": "uuid",
+      "title": "Flat Id",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "message_source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message Source"
+     },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Asserted by a service account; NOT verified by the backend",
+      "title": "On Behalf Of"
+     },
+     "on_behalf_of_verified": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Always false when on_behalf_of is set",
+      "title": "On Behalf Of Verified"
+     },
+     "resolved_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Resolved At"
+     },
+     "severity_score": {
+      "title": "Severity Score",
+      "type": "number"
+     },
+     "shutoff_gave_up_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shutoff Gave Up At"
+     },
+     "shutoff_warned_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shutoff Warned At"
+     },
+     "snoozed_until": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Snoozed Until"
+     },
+     "state": {
+      "title": "State",
+      "type": "string"
+     },
+     "tier": {
+      "title": "Tier",
+      "type": "integer"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "flat_id",
+     "anomaly_id",
+     "state",
+     "tier",
+     "severity_score",
+     "created_at",
+     "updated_at"
+    ],
+    "title": "AlertActionOut",
     "type": "object"
    },
    "AlertOut": {
@@ -153,6 +351,30 @@
      "severity_score": {
       "title": "Severity Score",
       "type": "number"
+     },
+     "shutoff_gave_up_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shutoff Gave Up At"
+     },
+     "shutoff_warned_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shutoff Warned At"
      },
      "snoozed_until": {
       "anyOf": [
@@ -399,6 +621,114 @@
     "title": "BaselineOut",
     "type": "object"
    },
+   "BindingUpdate": {
+    "additionalProperties": false,
+    "description": "resident -> flat_id; maintenance -> society_id; admin -> neither. Null/null unbinds.",
+    "properties": {
+     "flat_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Flat Id"
+     },
+     "society_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Society Id"
+     }
+    },
+    "title": "BindingUpdate",
+    "type": "object"
+   },
+   "ChangePasswordRequest": {
+    "additionalProperties": false,
+    "properties": {
+     "current_password": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Current Password",
+      "type": "string"
+     },
+     "new_password": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "New Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "current_password",
+     "new_password"
+    ],
+    "title": "ChangePasswordRequest",
+    "type": "object"
+   },
+   "FlatCreate": {
+    "additionalProperties": false,
+    "properties": {
+     "floor": {
+      "anyOf": [
+       {
+        "maximum": 300.0,
+        "minimum": -5.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Floor"
+     },
+     "residents": {
+      "default": 1,
+      "maximum": 50.0,
+      "minimum": 0.0,
+      "title": "Residents",
+      "type": "integer"
+     },
+     "sensor_id": {
+      "anyOf": [
+       {
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sensor Id"
+     },
+     "society_id": {
+      "format": "uuid",
+      "title": "Society Id",
+      "type": "string"
+     },
+     "unit_number": {
+      "pattern": "^[A-Za-z0-9_-]{1,50}$",
+      "title": "Unit Number",
+      "type": "string"
+     }
+    },
+    "required": [
+     "society_id",
+     "unit_number"
+    ],
+    "title": "FlatCreate",
+    "type": "object"
+   },
    "FlatDetail": {
     "properties": {
      "baseline_status": {
@@ -538,6 +868,52 @@
     "title": "FlatOut",
     "type": "object"
    },
+   "FlatUpdate": {
+    "additionalProperties": false,
+    "description": "Unit number and society are immutable (they name the MQTT topics).",
+    "properties": {
+     "floor": {
+      "anyOf": [
+       {
+        "maximum": 300.0,
+        "minimum": -5.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Floor"
+     },
+     "residents": {
+      "anyOf": [
+       {
+        "maximum": 50.0,
+        "minimum": 0.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Residents"
+     },
+     "sensor_id": {
+      "anyOf": [
+       {
+        "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sensor Id"
+     }
+    },
+    "title": "FlatUpdate",
+    "type": "object"
+   },
    "FlatUsageRequest": {
     "properties": {
      "flat_id": {
@@ -645,7 +1021,7 @@
     "additionalProperties": false,
     "properties": {
      "password": {
-      "maxLength": 128,
+      "maxLength": 256,
       "minLength": 1,
       "title": "Password",
       "type": "string"
@@ -666,6 +1042,19 @@
    },
    "OverrideRequest": {
     "properties": {
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Service accounts only: end user the action is performed for. Recorded in the audit trail as asserted, not verified. Other callers get 422.",
+      "title": "On Behalf Of"
+     },
      "overridden_by": {
       "anyOf": [
        {
@@ -676,6 +1065,8 @@
         "type": "null"
        }
       ],
+      "deprecated": true,
+      "description": "Ignored; the actor is the caller",
       "title": "Overridden By"
      },
      "reason": {
@@ -689,6 +1080,22 @@
      "reason"
     ],
     "title": "OverrideRequest",
+    "type": "object"
+   },
+   "PasswordReset": {
+    "additionalProperties": false,
+    "properties": {
+     "new_password": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "New Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "new_password"
+    ],
+    "title": "PasswordReset",
     "type": "object"
    },
    "ReadingOut": {
@@ -770,6 +1177,22 @@
     "title": "ReadingOut",
     "type": "object"
    },
+   "RefreshRequest": {
+    "additionalProperties": false,
+    "properties": {
+     "refresh_token": {
+      "maxLength": 200,
+      "minLength": 20,
+      "title": "Refresh Token",
+      "type": "string"
+     }
+    },
+    "required": [
+     "refresh_token"
+    ],
+    "title": "RefreshRequest",
+    "type": "object"
+   },
    "RegisterRequest": {
     "additionalProperties": false,
     "properties": {
@@ -780,8 +1203,8 @@
       "type": "string"
      },
      "password": {
-      "maxLength": 72,
-      "minLength": 8,
+      "maxLength": 256,
+      "minLength": 1,
       "title": "Password",
       "type": "string"
      },
@@ -802,6 +1225,19 @@
    },
    "ResolveRequest": {
     "properties": {
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Service accounts only: end user the action is performed for. Recorded in the audit trail as asserted, not verified. Other callers get 422.",
+      "title": "On Behalf Of"
+     },
      "resolved_by": {
       "anyOf": [
        {
@@ -812,6 +1248,8 @@
         "type": "null"
        }
       ],
+      "deprecated": true,
+      "description": "Ignored; the actor is the caller",
       "title": "Resolved By"
      }
     },
@@ -884,6 +1322,19 @@
       "title": "Duration Minutes",
       "type": "integer"
      },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Service accounts only: end user the action is performed for. Recorded in the audit trail as asserted, not verified. Other callers get 422.",
+      "title": "On Behalf Of"
+     },
      "snoozed_by": {
       "anyOf": [
        {
@@ -894,6 +1345,8 @@
         "type": "null"
        }
       ],
+      "deprecated": true,
+      "description": "Ignored; the actor is the caller",
       "title": "Snoozed By"
      }
     },
@@ -901,6 +1354,42 @@
      "duration_minutes"
     ],
     "title": "SnoozeRequest",
+    "type": "object"
+   },
+   "SocietyCreate": {
+    "additionalProperties": false,
+    "properties": {
+     "address": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Address"
+     },
+     "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "slug": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "slug"
+    ],
+    "title": "SocietyCreate",
     "type": "object"
    },
    "SocietyOut": {
@@ -983,6 +1472,39 @@
     "title": "SocietyStats",
     "type": "object"
    },
+   "SocietyUpdate": {
+    "additionalProperties": false,
+    "description": "The slug is immutable: it is part of every MQTT topic and device credential.",
+    "properties": {
+     "address": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Address"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     }
+    },
+    "title": "SocietyUpdate",
+    "type": "object"
+   },
    "TokenResponse": {
     "properties": {
      "access_token": {
@@ -992,6 +1514,14 @@
      "expires_in": {
       "title": "Expires In",
       "type": "integer"
+     },
+     "refresh_expires_in": {
+      "title": "Refresh Expires In",
+      "type": "integer"
+     },
+     "refresh_token": {
+      "title": "Refresh Token",
+      "type": "string"
      },
      "role": {
       "enum": [
@@ -1011,8 +1541,10 @@
     },
     "required": [
      "access_token",
+     "refresh_token",
      "role",
-     "expires_in"
+     "expires_in",
+     "refresh_expires_in"
     ],
     "title": "TokenResponse",
     "type": "object"
@@ -1042,7 +1574,20 @@
         "type": "null"
        }
       ],
+      "deprecated": true,
       "title": "Issued By"
+     },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "On Behalf Of"
      },
      "reason": {
       "anyOf": [
@@ -1092,6 +1637,75 @@
     "title": "TopLossesRequest",
     "type": "object"
    },
+   "UserCreate": {
+    "additionalProperties": false,
+    "properties": {
+     "flat_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Flat Id"
+     },
+     "is_service": {
+      "default": false,
+      "title": "Is Service",
+      "type": "boolean"
+     },
+     "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "password": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Password",
+      "type": "string"
+     },
+     "role": {
+      "default": "resident",
+      "enum": [
+       "resident",
+       "admin",
+       "maintenance"
+      ],
+      "title": "Role",
+      "type": "string"
+     },
+     "society_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Society Id"
+     },
+     "username": {
+      "maxLength": 50,
+      "minLength": 3,
+      "title": "Username",
+      "type": "string"
+     }
+    },
+    "required": [
+     "username",
+     "password",
+     "name"
+    ],
+    "title": "UserCreate",
+    "type": "object"
+   },
    "UserOut": {
     "properties": {
      "created_at": {
@@ -1115,6 +1729,16 @@
       "format": "uuid",
       "title": "Id",
       "type": "string"
+     },
+     "is_active": {
+      "default": true,
+      "title": "Is Active",
+      "type": "boolean"
+     },
+     "is_service": {
+      "default": false,
+      "title": "Is Service",
+      "type": "boolean"
      },
      "name": {
       "title": "Name",
@@ -1141,6 +1765,17 @@
       ],
       "title": "Society Id"
      },
+     "telegram_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Telegram Id"
+     },
      "username": {
       "title": "Username",
       "type": "string"
@@ -1154,6 +1789,76 @@
      "created_at"
     ],
     "title": "UserOut",
+    "type": "object"
+   },
+   "UserUpdate": {
+    "additionalProperties": false,
+    "properties": {
+     "is_active": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Active"
+     },
+     "is_service": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Is Service"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "role": {
+      "anyOf": [
+       {
+        "enum": [
+         "resident",
+         "admin",
+         "maintenance"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Role"
+     },
+     "telegram_id": {
+      "anyOf": [
+       {
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Telegram Id"
+     }
+    },
+    "title": "UserUpdate",
     "type": "object"
    },
    "ValidationError": {
@@ -1194,6 +1899,106 @@
      "type"
     ],
     "title": "ValidationError",
+    "type": "object"
+   },
+   "ValveCommandActionOut": {
+    "properties": {
+     "alert_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alert Id"
+     },
+     "command": {
+      "title": "Command",
+      "type": "string"
+     },
+     "confirmed_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Confirmed At"
+     },
+     "flat_id": {
+      "format": "uuid",
+      "title": "Flat Id",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "issued_at": {
+      "format": "date-time",
+      "title": "Issued At",
+      "type": "string"
+     },
+     "issued_by": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Issued By"
+     },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Asserted by a service account; NOT verified by the backend",
+      "title": "On Behalf Of"
+     },
+     "on_behalf_of_verified": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Always false when on_behalf_of is set",
+      "title": "On Behalf Of Verified"
+     },
+     "source": {
+      "title": "Source",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "flat_id",
+     "command",
+     "source",
+     "issued_at",
+     "status"
+    ],
+    "title": "ValveCommandActionOut",
     "type": "object"
    },
    "ValveCommandOut": {
@@ -1285,7 +2090,22 @@
         "type": "null"
        }
       ],
+      "deprecated": true,
+      "description": "Ignored; the actor is the caller",
       "title": "Issued By"
+     },
+     "on_behalf_of": {
+      "anyOf": [
+       {
+        "maxLength": 100,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Service accounts only: end user the action is performed for. Recorded in the audit trail as asserted, not verified. Other callers get 422.",
+      "title": "On Behalf Of"
      },
      "reason": {
       "anyOf": [
@@ -1360,6 +2180,24 @@
      "society_id"
     ],
     "title": "WeeklyReportRequest",
+    "type": "object"
+   },
+   "WsTicketResponse": {
+    "properties": {
+     "expires_in": {
+      "title": "Expires In",
+      "type": "integer"
+     },
+     "ticket": {
+      "title": "Ticket",
+      "type": "string"
+     }
+    },
+    "required": [
+     "ticket",
+     "expires_in"
+    ],
+    "title": "WsTicketResponse",
     "type": "object"
    }
   },
@@ -1562,7 +2400,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/AlertOut"
+         "$ref": "#/components/schemas/AlertActionOut"
         }
        }
       },
@@ -1620,7 +2458,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/AlertOut"
+         "$ref": "#/components/schemas/AlertActionOut"
         }
        }
       },
@@ -1685,7 +2523,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/AlertOut"
+         "$ref": "#/components/schemas/AlertActionOut"
         }
        }
       },
@@ -1743,7 +2581,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/AlertOut"
+         "$ref": "#/components/schemas/AlertActionOut"
         }
        }
       },
@@ -1930,6 +2768,53 @@
     ]
    }
   },
+  "/api/v1/auth/change-password": {
+   "post": {
+    "description": "Needs the current password. Every other session is signed out; fresh tokens returned.",
+    "operationId": "change_password_api_v1_auth_change_password_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangePasswordRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Change Password",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
   "/api/v1/auth/login": {
    "post": {
     "operationId": "login_api_v1_auth_login_post",
@@ -1971,6 +2856,61 @@
     ]
    }
   },
+  "/api/v1/auth/logout": {
+   "post": {
+    "description": "Revoke the presented refresh token's family (this device). Always 204.",
+    "operationId": "logout_api_v1_auth_logout_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RefreshRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Logout",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
+  "/api/v1/auth/logout-all": {
+   "post": {
+    "description": "Sign out everywhere: all access tokens (token_version) and refresh tokens die.",
+    "operationId": "logout_all_api_v1_auth_logout_all_post",
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Logout All",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
   "/api/v1/auth/me": {
    "get": {
     "operationId": "me_api_v1_auth_me_get",
@@ -1997,9 +2937,51 @@
     ]
    }
   },
+  "/api/v1/auth/refresh": {
+   "post": {
+    "description": "Rotate: the presented refresh token is spent and a new pair returned. Presenting a spent\ntoken again revokes the whole token family (assumed stolen).",
+    "operationId": "refresh_api_v1_auth_refresh_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RefreshRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TokenResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Refresh",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
   "/api/v1/auth/register": {
    "post": {
-    "description": "Public self-registration. The role is always 'resident'.",
+    "description": "Self-registration (OFF unless ALLOW_SELF_REGISTRATION=true). Creates an UNBOUND resident\nthat sees nothing until an admin binds it to a flat.",
     "operationId": "register_api_v1_auth_register_post",
     "requestBody": {
      "content": {
@@ -2041,6 +3023,7 @@
   },
   "/api/v1/auth/users/{user_id}/role": {
    "put": {
+    "description": "Kept for compatibility; prefer PATCH /users/{id}. Clears the binding and revokes the\nuser's sessions; refuses to demote the last active admin (409).",
     "operationId": "change_role_api_v1_auth_users__user_id__role_put",
     "parameters": [
      {
@@ -2097,8 +3080,36 @@
     ]
    }
   },
+  "/api/v1/auth/ws-ticket": {
+   "post": {
+    "description": "Single-use, 30 s ticket for `/api/v1/ws/live?ticket=...` (keeps JWTs out of URLs).",
+    "operationId": "ws_ticket_api_v1_auth_ws_ticket_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WsTicketResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ws Ticket",
+    "tags": [
+     "auth"
+    ]
+   }
+  },
   "/api/v1/flats": {
    "get": {
+    "description": "admin: all flats; maintenance: their society's; resident: only their own flat.",
     "operationId": "list_flats_api_v1_flats_get",
     "parameters": [
      {
@@ -2177,9 +3188,93 @@
     "tags": [
      "flats"
     ]
+   },
+   "post": {
+    "operationId": "create_flat_api_v1_flats_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FlatCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FlatOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Create Flat",
+    "tags": [
+     "flats"
+    ]
    }
   },
   "/api/v1/flats/{flat_id}": {
+   "delete": {
+    "description": "Destroys the flat's readings, alerts and baselines. Refused while its valve is closed\n(water would stay off with nobody able to command it).",
+    "operationId": "delete_flat_api_v1_flats__flat_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "flat_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Flat Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Flat",
+    "tags": [
+     "flats"
+    ]
+   },
    "get": {
     "operationId": "get_flat_api_v1_flats__flat_id__get",
     "parameters": [
@@ -2222,6 +3317,62 @@
      }
     ],
     "summary": "Get Flat",
+    "tags": [
+     "flats"
+    ]
+   },
+   "patch": {
+    "operationId": "update_flat_api_v1_flats__flat_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "flat_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Flat Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FlatUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FlatOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update Flat",
     "tags": [
      "flats"
     ]
@@ -2547,6 +3698,7 @@
   },
   "/api/v1/societies": {
    "get": {
+    "description": "admin: all; maintenance / resident: only their own society (summary).",
     "operationId": "list_societies_api_v1_societies_get",
     "parameters": [
      {
@@ -2610,9 +3762,93 @@
     "tags": [
      "societies"
     ]
+   },
+   "post": {
+    "operationId": "create_society_api_v1_societies_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SocietyCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SocietyOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Create Society",
+    "tags": [
+     "societies"
+    ]
    }
   },
   "/api/v1/societies/{society_id}": {
+   "delete": {
+    "description": "Only an empty society can be deleted (remove its flats first: that is destructive and\ndeliberately a separate, per-flat action).",
+    "operationId": "delete_society_api_v1_societies__society_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "society_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Society Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Delete Society",
+    "tags": [
+     "societies"
+    ]
+   },
    "get": {
     "operationId": "get_society_api_v1_societies__society_id__get",
     "parameters": [
@@ -2655,6 +3891,62 @@
      }
     ],
     "summary": "Get Society",
+    "tags": [
+     "societies"
+    ]
+   },
+   "patch": {
+    "operationId": "update_society_api_v1_societies__society_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "society_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Society Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SocietyUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SocietyOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update Society",
     "tags": [
      "societies"
     ]
@@ -2928,6 +4220,510 @@
     ]
    }
   },
+  "/api/v1/users": {
+   "get": {
+    "operationId": "list_users_api_v1_users_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "role",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "resident",
+          "admin",
+          "maintenance"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Role"
+      }
+     },
+     {
+      "in": "query",
+      "name": "is_active",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Is Active"
+      }
+     },
+     {
+      "in": "query",
+      "name": "society_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Society Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "flat_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Flat Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 50,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "description": "Page size (max 500)",
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "description": "Page size (max 500)",
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "offset",
+      "required": false,
+      "schema": {
+       "default": 0,
+       "minimum": 0,
+       "title": "Offset",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/UserOut"
+         },
+         "title": "Response List Users Api V1 Users Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Users",
+    "tags": [
+     "users"
+    ]
+   },
+   "post": {
+    "operationId": "create_user_api_v1_users_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserCreate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Create User",
+    "tags": [
+     "users"
+    ]
+   }
+  },
+  "/api/v1/users/by-username/{username}": {
+   "get": {
+    "description": "For the bot's /link flow: verify that a username exists. Admin or service account only.",
+    "operationId": "get_user_by_username_api_v1_users_by_username__username__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "username",
+      "required": true,
+      "schema": {
+       "maxLength": 50,
+       "minLength": 1,
+       "title": "Username",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Get User By Username",
+    "tags": [
+     "users"
+    ]
+   }
+  },
+  "/api/v1/users/{user_id}": {
+   "get": {
+    "operationId": "get_user_api_v1_users__user_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Get User",
+    "tags": [
+     "users"
+    ]
+   },
+   "patch": {
+    "operationId": "update_user_api_v1_users__user_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UserUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Update User",
+    "tags": [
+     "users"
+    ]
+   }
+  },
+  "/api/v1/users/{user_id}/binding": {
+   "put": {
+    "operationId": "set_binding_api_v1_users__user_id__binding_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BindingUpdate"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/UserOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Set Binding",
+    "tags": [
+     "users"
+    ]
+   }
+  },
+  "/api/v1/users/{user_id}/logout-all": {
+   "post": {
+    "operationId": "logout_all_api_v1_users__user_id__logout_all_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Logout All",
+    "tags": [
+     "users"
+    ]
+   }
+  },
+  "/api/v1/users/{user_id}/reset-password": {
+   "post": {
+    "description": "Sets a new password, clears any lockout and signs the user out everywhere.",
+    "operationId": "reset_password_api_v1_users__user_id__reset_password_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "user_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "User Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PasswordReset"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Reset Password",
+    "tags": [
+     "users"
+    ]
+   }
+  },
   "/api/v1/valves/{flat_id}": {
    "get": {
     "operationId": "valve_status_api_v1_valves__flat_id__get",
@@ -3006,7 +4802,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/ValveCommandOut"
+         "$ref": "#/components/schemas/ValveCommandActionOut"
         }
        }
       },
@@ -3064,7 +4860,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/ValveCommandOut"
+         "$ref": "#/components/schemas/ValveCommandActionOut"
         }
        }
       },
@@ -3094,6 +4890,7 @@
   },
   "/health": {
    "get": {
+    "description": "Liveness-ish summary for load balancers: NOTHING but ok/degraded is disclosed.",
     "operationId": "health_health_get",
     "responses": {
      "200": {
@@ -3111,8 +4908,33 @@
     ]
    }
   },
+  "/health/details": {
+   "get": {
+    "operationId": "details_health_details_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Details",
+    "tags": [
+     "health"
+    ]
+   }
+  },
   "/health/ready": {
    "get": {
+    "description": "503 unless the DB answers, the schema is at the code's alembic head and (when\nMQTT_REQUIRED) the broker is connected.",
     "operationId": "ready_health_ready_get",
     "responses": {
      "200": {

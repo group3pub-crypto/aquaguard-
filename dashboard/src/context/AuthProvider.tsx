@@ -97,6 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Revoke the refresh-token family server-side (best effort), then forget everything locally.
+    void api.logout();
     dropSession();
     routerRef.current.replace('/login');
   }, [dropSession]);

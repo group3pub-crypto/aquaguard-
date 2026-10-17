@@ -25,8 +25,16 @@ PLACEHOLDER = "CHANGE_ME"
 SETS = {
     "prod": ["docker-compose.yml", "docker-compose.prod.yml"],
     "dev": ["docker-compose.yml", "docker-compose.dev.yml"],
-    "prod+timescale": ["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.timescale.yml"],
-    "prod+monitoring": ["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.monitoring.yml"],
+    "prod+timescale": [
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        "docker-compose.timescale.yml",
+    ],
+    "prod+monitoring": [
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        "docker-compose.monitoring.yml",
+    ],
 }
 PROD_PUBLISHED = {("proxy", 80), ("proxy", 443), ("mosquitto", 8883)}
 HARDENING_EXEMPT_READ_ONLY = {"prometheus", "alertmanager"}  # monitoring images write to volumes

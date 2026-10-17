@@ -10,6 +10,10 @@ export interface RuntimeConfig {
   wsUrl: string;
   /** IANA timezone the backend uses for baseline hour-of-week slots (settings.timezone). */
   timezone: string;
+  /** Mirrors the backend ALLOW_SELF_REGISTRATION flag (default off); controls the /register link. */
+  allowSelfRegistration: boolean;
+  /** Mirrors the backend SHUTOFF_WARNING_SECONDS; only used to render the warning countdown. */
+  shutoffWarningSeconds: number;
 }
 
 declare global {
@@ -20,6 +24,15 @@ declare global {
 
 export const DEFAULT_API_URL = 'http://localhost:8000';
 export const DEFAULT_TIMEZONE = 'UTC';
+export const DEFAULT_SHUTOFF_WARNING_SECONDS = 300;
+
+export function parseBool(v: string | undefined): boolean {
+  return v !== undefined && /^(1|true|yes|on)$/i.test(v.trim());
+}
+export function parsePositiveNumber(v: string | undefined, fallback: number): number {
+  const n = Number(v);
+  return v !== undefined && Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 const trim = (u: string) => u.replace(/\/+$/, '');
 
@@ -32,5 +45,13 @@ export function getConfig(): RuntimeConfig {
   const apiUrl = trim(injected?.apiUrl || process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL);
   const wsUrl = trim(injected?.wsUrl || process.env.NEXT_PUBLIC_WS_URL || deriveWsUrl(apiUrl));
   const timezone = injected?.timezone || process.env.NEXT_PUBLIC_BACKEND_TZ || DEFAULT_TIMEZONE;
-  return { apiUrl, wsUrl, timezone };
+  const allowSelfRegistration =
+    typeof injected?.allowSelfRegistration === 'boolean'
+      ? injected.allowSelfRegistration
+      : parseBool(process.env.NEXT_PUBLIC_ALLOW_SELF_REGISTRATION);
+  const shutoffWarningSeconds =
+    typeof injected?.shutoffWarningSeconds === 'number' && injected.shutoffWarningSeconds > 0
+      ? injected.shutoffWarningSeconds
+      : parsePositiveNumber(process.env.NEXT_PUBLIC_SHUTOFF_WARNING_SECONDS, DEFAULT_SHUTOFF_WARNING_SECONDS);
+  return { apiUrl, wsUrl, timezone, allowSelfRegistration, shutoffWarningSeconds };
 }

@@ -86,7 +86,10 @@ def validate(env: dict[str, str], dev: bool = False) -> list[str]:
         errs.append("ACME needs a real, publicly resolvable PUBLIC_DOMAIN")
     if env.get("FORWARDED_ALLOW_IPS", "").strip() == "*":
         errs.append("FORWARDED_ALLOW_IPS must list the proxy address, never '*'")
-    if env.get("METRICS_ENABLED", "false").lower() == "true" and len(env.get("METRICS_TOKEN", "")) < 24:
+    if (
+        env.get("METRICS_ENABLED", "false").lower() == "true"
+        and len(env.get("METRICS_TOKEN", "")) < 24
+    ):
         errs.append("METRICS_ENABLED=true needs METRICS_TOKEN of at least 24 characters")
     if env.get("MQTT_DEVICES", "").strip() and len(env.get("MQTT_DEVICE_SECRET", "")) < 32:
         errs.append("MQTT_DEVICES needs MQTT_DEVICE_SECRET of at least 32 characters")
@@ -97,7 +100,9 @@ def validate(env: dict[str, str], dev: bool = False) -> list[str]:
             errs.append("LLM_TIMEOUT_S must be <= 4 (backend limit); the bot has BOT_LLM_TIMEOUT_S")
     except ValueError:
         errs.append("LLM_TIMEOUT_S must be a number")
-    if env.get("LLM_ENABLED", "false").lower() == "true" and is_placeholder(env.get("ANTHROPIC_API_KEY", "")):
+    if env.get("LLM_ENABLED", "false").lower() == "true" and is_placeholder(
+        env.get("ANTHROPIC_API_KEY", "")
+    ):
         errs.append("LLM_ENABLED=true needs ANTHROPIC_API_KEY")
     if not dev and not (env.get("MQTT_TLS_CERT_FILE") and env.get("MQTT_TLS_KEY_FILE")):
         errs.append(

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     bot_poll_interval: float = Field(30.0, ge=5)
     bot_send_rate: float = Field(25.0, gt=0, le=30)
     bot_api_timeout: float = 10.0
+    # must equal the backend SHUTOFF_WARNING_SECONDS: only used to display the shut-off countdown
+    bot_shutoff_warning_seconds: float = Field(300.0, ge=0)
     # Optional LLM "smart mode" (natural-language intent routing). Off unless BOT_NLU_ENABLED=true.
     bot_nlu_enabled: bool = False
     anthropic_api_key: SecretStr | None = None

@@ -22,6 +22,7 @@ from bot.handlers import callbacks, commands, queries
 from bot.poller import run_poller
 from bot.ratelimit import RateLimiter
 from bot.tools import build_default_registry
+from bot.tools.alerts import set_warning_seconds
 
 log = logging.getLogger("bot")
 
@@ -38,6 +39,7 @@ def build_app(settings: Settings) -> Application:
         settings.bot_api_password.get_secret_value(),
         timeout=settings.bot_api_timeout,
     )
+    set_warning_seconds(settings.bot_shutoff_warning_seconds)
     deps = Deps(
         api=api,
         registry=build_default_registry(),

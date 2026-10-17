@@ -1,3 +1,7 @@
+import re
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from bot.auth import Principal, Role
 from bot.tools.registry import Tool, ToolRegistry
 from bot.tools.scope import can_see_alert, scoped_flat
@@ -17,15 +21,115 @@ LABELS = {
 _UUID = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 
 
-def fmt_alert(a: dict, unit: str) -> str:
-    """One alert as text. `unit` is the resolved unit number (not the flat UUID)."""
+# Backend SHUTOFF_WARNING_SECONDS (default 300): the bot only derives a countdown from
+# `shutoff_warned_at`, the backend decides when the valve command is really sent.
+_warning_seconds = 300.0
+
+# Past/present-tense claims that water/valve IS or WAS shut off. Only a device-confirmed alert
+# (state == auto_shutoff) may say so; "will be shut off" (a warning) must not match.
+_SHUTOFF_CLAIM = re.compile(
+    r"(\b(water|supply|valve|mains|flat|unit)\b[^.!?\n]{0,40}"
+    r"\b(has been|have been|was|were|is now|are now|is)\s+(automatically\s+)?"
+    r"(shut[\s-]?off|shut\s+down|shut|closed|turned\s+off|cut\s+off|isolated|off)\b"
+    r"|\b(we|i|aquaguard|the system)\s+(have\s+|has\s+)?(automatically\s+)?"
+    r"(shut|closed|turned\s+off|cut\s+off|isolated)\b)",
+    re.I,
+)
+WITHHELD = "(message withheld: it claimed a shut-off the device has not confirmed)"
+
+
+def set_warning_seconds(seconds: float) -> None:
+    global _warning_seconds
+    _warning_seconds = max(0.0, float(seconds))
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def safe_message(state: str, message: str | None) -> str:
+    """Backend text, minus any claim of a shut-off unless the alert is device-confirmed."""
+    msg = (message or "").strip()
+    if msg and state != "auto_shutoff" and _SHUTOFF_CLAIM.search(msg):
+        return WITHHELD
+    return msg
+
+
+def shutoff_eta(a: dict, now: datetime | None = None) -> tuple[datetime, int] | None:
+    """(planned shut-off time, seconds remaining) while a warning window is running."""
+    warned = _parse_ts(a.get("shutoff_warned_at"))
+    if warned is None or a.get("shutoff_gave_up_at") or a.get("state") in ("auto_shutoff", "resolved"):
+        return None
+    when = warned + timedelta(seconds=_warning_seconds)
+    return when, int((when - (now or datetime.now(UTC))).total_seconds())
+
+
+def countdown(remaining: int) -> str:
+    if remaining <= 0:
+        return "any moment now"
+    if remaining < 60:
+        return "in under a minute"
+    return f"in about {round(remaining / 60)} min"
+
+
+def fmt_alert(a: dict, unit: str, now: datetime | None = None) -> str:
+    """One alert as text. `unit` is the resolved unit number (not the flat UUID).
+
+    Wording rule: water is only reported as shut off when `state == auto_shutoff`, which the
+    backend sets only after the valve device confirmed. Every other state says the opposite.
+    """
     state = a.get("state", "?")
     head = f"[{LABELS.get(state, state)}] {unit} - tier {a.get('tier', '?')}"
     score = a.get("severity_score")
     if isinstance(score, int | float):
         head += f", severity {score:.2f}"
-    msg = (a.get("message") or "").strip()
-    return f"{head}\n{msg}" if msg else head
+    lines = [head]
+    msg = safe_message(state, a.get("message"))
+    if msg:
+        lines.append(msg)
+    if state == "auto_shutoff":
+        lines.append("Valve closed automatically (confirmed by the device).")
+    elif a.get("shutoff_gave_up_at") and state not in ("resolved", "overridden"):
+        lines.append("Automatic shut-off FAILED: the valve is NOT confirmed closed. Close it manually.")
+    else:
+        eta = shutoff_eta(a, now)
+        if eta is not None:
+            when, remaining = eta
+            lines.append(
+                f"Automatic shut-off planned {countdown(remaining)} ({when:%H:%M} UTC) unless the alert is "
+                "acknowledged. Water has NOT been shut off."
+            )
+    return "\n".join(lines)
+
+
+def fmt_shutoff_warning(a: dict, unit: str, now: datetime | None = None) -> str:
+    eta = shutoff_eta(a, now)
+    when = f" {countdown(eta[1])} ({eta[0]:%H:%M} UTC)" if eta else " soon"
+    return (
+        f"[SHUT-OFF WARNING] {unit}: the water will be shut off automatically{when} unless the alert "
+        "is acknowledged. Water has NOT been shut off yet."
+    )
+
+
+def fmt_shutoff_failed(a: dict, unit: str) -> str:
+    return (
+        f"[SHUT-OFF FAILED] {unit}: the automatic shut-off could not be confirmed by the valve device "
+        "and the system gave up. Water is NOT confirmed shut off. Close the valve manually."
+    )
+
+
+def acted_by(resp: Any) -> str:
+    """Suffix surfacing the backend's echo of `on_behalf_of` (asserted, never verified)."""
+    who = resp.get("on_behalf_of") if isinstance(resp, dict) else None
+    if not who:
+        return " Recorded under the bot service account."
+    return f" Recorded on behalf of {who} (asserted by the bot, not verified by the backend)."
 
 
 async def list_alerts(api, args: dict, p: Principal) -> str:
@@ -44,19 +148,19 @@ async def list_alerts(api, args: dict, p: Principal) -> str:
 
 
 async def ack(api, args: dict, p: Principal) -> str:
-    await api.ack_alert(args["alert_id"])
-    return f"Alert {args['alert_id']} acknowledged."
+    resp = await api.ack_alert(args["alert_id"], p.on_behalf_of)
+    return f"Alert {args['alert_id']} acknowledged.{acted_by(resp)}"
 
 
 async def snooze(api, args: dict, p: Principal) -> str:
     mins = args.get("minutes", 60)
-    await api.snooze_alert(args["alert_id"], mins)
-    return f"Alert {args['alert_id']} snoozed for {mins} min."
+    resp = await api.snooze_alert(args["alert_id"], mins, p.on_behalf_of)
+    return f"Alert {args['alert_id']} snoozed for {mins} min.{acted_by(resp)}"
 
 
 async def resolve(api, args: dict, p: Principal) -> str:
-    await api.resolve_alert(args["alert_id"])
-    return f"Alert {args['alert_id']} resolved."
+    resp = await api.resolve_alert(args["alert_id"], p.on_behalf_of)
+    return f"Alert {args['alert_id']} resolved.{acted_by(resp)}"
 
 
 _ID = {"type": "string", "pattern": _UUID, "maxLength": 36}
