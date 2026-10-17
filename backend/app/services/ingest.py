@@ -234,7 +234,9 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
             flat = await FlatRepository(session).get(flat_id)
             if flat is None:
                 return None
-            outcome = await detector.run_detection(session, rt.models, flat, now)
+            outcome = await detector.run_detection(
+                session, rt.models, flat, now, policy=rt.settings.detection_policy
+            )
             if outcome is None:
                 return None
             for resolved in outcome.resolved:

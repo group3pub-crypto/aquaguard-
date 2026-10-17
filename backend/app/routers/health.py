@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app import metrics
 from app.dependencies import RT, AdminUser, PublicRoute, Session, metrics_policy
+from app.services import detector
 from app.migrations import current_revision, head_revision, revision_from_session
 
 router = APIRouter(tags=["health"])
@@ -20,6 +21,13 @@ def _mqtt_state(rt) -> str:
     if not rt.settings.mqtt_enabled:
         return "disabled"
     return "connected" if rt.publisher.connected else "disconnected"
+
+
+async def _detection_state(rt) -> dict:
+    if rt.settings.detection_policy != "rules":
+        await rt.models.ensure_loaded()
+    effective, reason = detector.effective_policy(rt.settings.detection_policy, rt.models)
+    return {"policy": rt.settings.detection_policy, "effective": effective, "reason": reason}
 
 
 async def _session_ok(session) -> bool:
@@ -72,6 +80,7 @@ async def details(rt: RT, admin: AdminUser, session: Session):
         "maintenance_leader": rt.is_leader,
         "ws_connections": rt.ws.count,
         "models": getattr(rt.models, "model_status", None),
+        "detection": await _detection_state(rt),
         "ingest": dict(rt.counters),
         "dead_letters": {"count": len(rt.dead_letters), "recent": list(rt.dead_letters)[-10:]},
     }

@@ -451,16 +451,51 @@ def _vectorize(features: dict[str, float], names: list[str]) -> np.ndarray | Non
     return arr if np.isfinite(arr).all() else None
 
 
+POLICIES = ("rules", "ml", "hybrid")
+HYBRID_VETO_P_NORMAL = 0.5  # hybrid: ML vetoes a rules alert when P(normal) exceeds this
+
+
+def effective_policy(policy: str, store: ModelStore | None) -> tuple[str, str | None]:
+    """(policy actually in force, why it differs from the configured one or None).
+
+    ``ml`` / ``hybrid`` need loaded, manifest-verified models; without them detection is
+    rules-only and /health/details says so.
+    """
+    if policy == "rules":
+        return "rules", None
+    if store is not None and store.ml_ready:
+        return policy, None
+    status = getattr(store, "model_status", {}) if store is not None else {}
+    reason = status.get("detector") or "models_unavailable"
+    return "rules", f"ml_unavailable:{reason}"
+
+
 async def classify_anomaly_ml(
-    features: dict[str, float], store: ModelStore | None = None, *, baseline_median: float = 0.0
+    features: dict[str, float],
+    store: ModelStore | None = None,
+    *,
+    baseline_median: float = 0.0,
+    policy: str = "ml",
 ) -> Detection | None:
-    """IsolationForest + RandomForest when available and the feature vector is valid;
-    otherwise the rule classifier. Never raises on model problems."""
+    """Classify per DETECTION_POLICY. Never raises on model problems.
+
+    * ``rules``  - deterministic rule classifier only.
+    * ``ml``     - IsolationForest + RandomForest when available, else rules.
+    * ``hybrid`` - the rules are a GATE (no rules alert -> no alert); the RandomForest then
+      supplies class and confidence and may veto (P(normal) > 0.5). No models -> rules only.
+    """
+    if policy not in POLICIES:
+        raise ValueError(f"unknown detection policy {policy!r}")
+    rules = classify_anomaly_rules(features, baseline_median)
+    if policy == "rules":
+        return rules
     store = store or ModelStore(Path("."))
     await store.ensure_loaded()
-    rules = classify_anomaly_rules(features, baseline_median)
     if not store.ml_ready:
         return rules
+    hybrid = policy == "hybrid"
+    if hybrid and rules is None:
+        return None
     x = _vectorize(features, store.feature_names)
     if x is None:
         log.warning("invalid_feature_vector_fallback_to_rules")
@@ -490,6 +525,14 @@ async def classify_anomaly_ml(
         log.warning("ml_inference_failed_fallback_to_rules", error=str(exc))
         return rules
     probs = {c: round(float(p), 4) for c, p in zip(classes, proba, strict=True)}
+    if hybrid:
+        if probs.get("normal", 0.0) > HYBRID_VETO_P_NORMAL:
+            return None  # ML veto of a rules alert
+        non_normal = [i for i, c in enumerate(classes) if c != "normal"]
+        if not non_normal:
+            return rules
+        ci = max(non_normal, key=lambda i: proba[i])
+        label = classes[ci]
     if label == "normal":
         if not iso_anom:
             return None
@@ -548,7 +591,11 @@ class DetectionOutcome:
 
 
 async def run_detection(
-    session: AsyncSession, store: ModelStore, flat: Flat, now: datetime | None = None
+    session: AsyncSession,
+    store: ModelStore,
+    flat: Flat,
+    now: datetime | None = None,
+    policy: str = "ml",
 ) -> DetectionOutcome | None:
     """Evaluate the trailing window for one flat; upsert/resolve anomaly rows."""
     now = now or datetime.now(UTC)
@@ -560,7 +607,7 @@ async def run_detection(
     features = extract_features(readings, slots, now)
     stats = slot_stats(slots, now)
     det = await classify_anomaly_ml(
-        features, store, baseline_median=stats["median"] if stats else 0.0
+        features, store, baseline_median=stats["median"] if stats else 0.0, policy=policy
     )
     repo = AnomalyRepository(session)
     if det is None:

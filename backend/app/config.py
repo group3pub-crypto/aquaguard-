@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     model_dir: Path = REPO_ROOT / "ml" / "models"
     model_manifest_required: bool | None = None  # default: required in production
     timezone: str = "UTC"
+    # rules = deterministic rules only; ml = RandomForest/IsolationForest (rules if models are
+    # missing); hybrid = rules gate + ML class/confidence/veto (rules only if models are missing
+    # or fail their manifest check). The default may change after ml/reports/benchmark.md is
+    # reviewed on real data.
+    detection_policy: Literal["rules", "ml", "hybrid"] = "hybrid"
     detect_debounce_seconds: float = 30.0
     # at most this many detections (CPU-bound ML) run at once; further triggers are shed and
     # retried on the flat's next reading so ingest never queues behind inference

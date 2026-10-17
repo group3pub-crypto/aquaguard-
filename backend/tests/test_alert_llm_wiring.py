@@ -86,7 +86,7 @@ async def test_learning_cap_note_goes_in_suffix(rt, db, world):
     async with db.session() as s:
         (await FlatRepository(s).get(world.flats[0].id)).baseline_status = "learning"
     rt.explainer = FakeExplainer(ExplainResult("LLM", "anthropic"))
-    _, aid = await make_alert(db, rt, world.flats[0].id, severity=0.95)
+    await make_alert(db, rt, world.flats[0].id, severity=0.95)
     await _drain()
     assert "being learned" in rt.explainer.ctxs[0]["suffix"]
 
