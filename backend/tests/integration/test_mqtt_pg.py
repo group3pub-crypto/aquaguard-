@@ -174,6 +174,47 @@ async def test_unacked_message_is_redelivered_after_crash_mid_processing(tmp_pat
         await asyncio.gather(task2, return_exceptions=True)
 
 
+async def test_restart_mid_stream_keeps_ingesting_without_loss_or_duplicates(
+    rt, pgdb, society, tmp_path
+):
+    """Backend stops while the device keeps publishing; the restarted service (same persistent
+    session) receives what was queued. Every message ends up exactly once, even when the same
+    message is published twice (QoS1 duplicate)."""
+    cid = f"it-backend-{uuid.uuid4().hex[:6]}"
+    rt.settings.mqtt_device_rate_per_min = 0
+
+    def make():
+        return MqttService(
+            mqtt_settings(tmp_path), lambda t, p: ingest.handle_message(rt, t, p), client_id=cid
+        )
+
+    async with pgdb.session() as s:
+        fid = (await FlatRepository(s).get_by_slug_unit("green-valley", "101")).id
+    now = time.time()
+    msg = lambda i: flow_msg(mid=f"{i:08x}", ts=now - 100 + i)  # noqa: E731
+    svc = make()
+    task = asyncio.create_task(svc.run())
+    await until(lambda: svc.connected)
+    for i in range(10):
+        await publish(TOPIC, msg(i))
+    await until(lambda: _has(pgdb, fid, 10))
+    task.cancel()  # backend down
+    await asyncio.gather(task, return_exceptions=True)
+    for i in range(10, 30):  # device keeps publishing meanwhile
+        await publish(TOPIC, msg(i))
+    await publish(TOPIC, msg(15))  # QoS1 duplicate of a message queued during the outage
+    svc2 = make()
+    task2 = asyncio.create_task(svc2.run())
+    try:
+        await until(lambda: _has(pgdb, fid, 30), timeout=30)
+        await asyncio.sleep(0.5)
+        assert await _count(pgdb, fid) == 30
+        assert rt.counters["flow_duplicate"] >= 1
+    finally:
+        task2.cancel()
+        await asyncio.gather(task2, return_exceptions=True)
+
+
 async def test_anonymous_connection_is_refused():
     b = broker()
     with pytest.raises(aiomqtt.MqttError):

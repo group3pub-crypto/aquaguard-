@@ -25,6 +25,27 @@ def test_tier_thresholds(sev, tier):
     assert ae.tier_for(sev) == tier
 
 
+WARN = timedelta(seconds=300)
+
+
+async def ack_close(db, rt, flat_id, short_id, state, now):
+    from app.services import valve_control
+
+    async with db.session() as s:
+        flat = await FlatRepository(s).get(flat_id)
+        return await valve_control.handle_ack(s, rt, flat, short_id, state, now)
+
+
+async def shut_off(db, rt, flat_id, aid, publisher, start=T0 + 6 * H):
+    """Walk the whole protocol: warning -> command -> device ack. Returns the ack time."""
+    assert await escalate(db, rt, aid, start, active_use=False)  # warning
+    assert (await get(db, aid)).shutoff_warned_at is not None and not publisher.sent
+    assert await escalate(db, rt, aid, start + WARN, active_use=False)  # command published
+    ack_at = start + WARN + timedelta(seconds=5)
+    await ack_close(db, rt, flat_id, publisher.sent[-1][1]["id"], "closed", ack_at)
+    return ack_at
+
+
 async def get(db, alert_id):
     async with db.session() as s:
         return await AlertRepository(s).get(alert_id)
@@ -166,25 +187,25 @@ def test_each_guard_blocks_individually(override, reason):
 
 
 async def test_auto_shutoff_end_to_end_closes_valve_and_audits(db, rt, world, publisher):
-    _, aid = await make_alert(db, rt, world.flats[0].id, severity=0.95, confidence=0.9)
+    fid = world.flats[0].id
+    _, aid = await make_alert(db, rt, fid, severity=0.95, confidence=0.9)
     assert not await escalate(db, rt, aid, T0 + timedelta(hours=5, minutes=59), active_use=False)
-    assert await escalate(db, rt, aid, T0 + 6 * H, active_use=False)
+    await shut_off(db, rt, fid, aid, publisher)
     a = await get(db, aid)
     assert (a.state, a.tier) == ("auto_shutoff", 4)
     topic, payload = publisher.sent[-1]
     assert topic == "aquaguard/green-valley/101/valve/cmd"
     assert payload["cmd"] == "close" and payload["src"] == "auto" and payload["v"] == 1
     async with db.session() as s:
-        cmds = await ValveRepository(s).recent(world.flats[0].id)
+        cmds = await ValveRepository(s).recent(fid)
         audit = await AuditRepository(s).find(entity_type="alert")
         valve_audit = await AuditRepository(s).find(entity_type="valve")
     assert [(c.command, c.source, c.status, c.alert_id) for c in cmds] == [
-        ("close", "auto", "pending", aid)
+        ("close", "auto", "confirmed", aid)
     ]
-    assert (
-        "auto_shutoff" in {r.action for r in audit}
-        and valve_audit[0].action == "valve_close_pending"
-    )
+    actions = {r.action for r in audit}
+    assert {"shutoff_warning", "shutoff_attempt", "auto_shutoff"} <= actions
+    assert "valve_close_pending" in {r.action for r in valve_audit}
 
 
 @pytest.mark.parametrize(
@@ -219,23 +240,49 @@ async def test_shutoff_requires_recent_data_and_no_active_use(db, rt, world, pub
     assert not await escalate(db, rt, aid, late)  # no readings at all -> cannot verify -> block
     await add_readings(db, fid, [1.0, 0.0, 2.5, 0.0, 1.2, 0.0] * 3, late)  # taps opening/closing
     assert not await escalate(db, rt, aid, late)
-    assert (await get(db, aid)).state == "ticket"
+    assert (await get(db, aid)).shutoff_warned_at is None
     async with db.session() as s:
         from sqlalchemy import delete
 
         await s.execute(delete(FlowReading))
     await add_readings(db, fid, [1.2] * 18, late)  # steady flow, never stops
-    assert await escalate(db, rt, aid, late)
-    assert (await get(db, aid)).state == "auto_shutoff" and publisher.sent
+    assert await escalate(db, rt, aid, late)  # -> warning only
+    assert (await get(db, aid)).state == "ticket" and not publisher.sent
+    assert await escalate(db, rt, aid, late + WARN)
+    assert publisher.sent and (await get(db, aid)).state == "ticket"  # not yet confirmed
 
 
-async def test_shutoff_command_failure_is_recorded_not_raised(db, rt, world, publisher):
-    publisher.fail = True
-    _, aid = await make_alert(db, rt, world.flats[0].id, severity=0.95)
-    assert await escalate(db, rt, aid, T0 + 6 * H, active_use=False)
+async def test_active_use_looks_back_over_the_configured_window(db, rt, world, publisher):
+    """A stop in flow 40 minutes ago (outside the old 15 min look-back) still blocks."""
+    fid = world.flats[0].id
+    _, aid = await make_alert(db, rt, fid, severity=0.95)
+    late = T0 + 6 * H
     async with db.session() as s:
-        cmd = (await ValveRepository(s).recent(world.flats[0].id))[0]
-    assert cmd.status == "failed"
+        for i in range(40):  # steady for the last 40 min ...
+            s.add(
+                FlowReading(
+                    flat_id=fid,
+                    timestamp=late - timedelta(seconds=30 * (i + 1)),
+                    flow_rate=1.2,
+                    volume=0.1,
+                    message_id=f"{i:08x}",
+                )
+            )
+        for i in range(20):  # ... but taps closing 40-50 minutes ago
+            s.add(
+                FlowReading(
+                    flat_id=fid,
+                    timestamp=late - timedelta(minutes=40, seconds=30 * i),
+                    flow_rate=0.0 if i % 2 else 1.5,
+                    volume=0.1,
+                    message_id=f"{100 + i:08x}",
+                )
+            )
+    assert not await escalate(db, rt, aid, late)
+    assert (await get(db, aid)).shutoff_warned_at is None
+    rt.settings.active_use_window_min = 15  # with a 15 min window the stop is out of sight
+    assert await escalate(db, rt, aid, late)
+    assert (await get(db, aid)).shutoff_warned_at is not None
 
 
 # ---------------------------------------------------------------- dedupe, override, transitions
@@ -300,7 +347,7 @@ async def test_override_sets_24h_cooldown_for_that_flat_and_type(db, rt, world):
 
 async def test_override_of_auto_shutoff_reopens_valve(db, rt, world, publisher):
     _, aid = await make_alert(db, rt, world.flats[0].id)
-    assert await escalate(db, rt, aid, T0 + 6 * H, active_use=False)
+    await shut_off(db, rt, world.flats[0].id, aid, publisher)
     async with db.session() as s:
         await ae.apply_action(
             s,

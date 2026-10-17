@@ -47,6 +47,8 @@ class Runtime:
             "heartbeat_failed": 0,
             "valve_ack_ok": 0,
             "valve_ack_failed": 0,
+            "rate_limited": 0,
+            "stale_reading": 0,
             "detect_run": 0,
             "detect_shed": 0,
         }
@@ -58,6 +60,8 @@ class Runtime:
     started_at: float = field(default_factory=time.time)
     is_leader: bool = False  # holds the maintenance advisory lock (always True without PG)
     detect_inflight: int = 0
+    # (slug, unit) -> (tokens, last_refill_monotonic): per-device ingest rate limit
+    rate_buckets: dict[tuple[str, str], tuple[float, float]] = field(default_factory=dict)
 
     def dead_letter(self, topic: str, reason: str) -> None:
         self.dead_letters.append(

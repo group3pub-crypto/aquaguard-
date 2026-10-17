@@ -85,6 +85,7 @@ async def pgdb(migrated) -> AsyncIterator[Database]:
 def make_app(pgdb, tmp_path) -> Callable:
     def _make(**kw):
         limiter.reset()
+        kw.setdefault("mqtt_device_rate_per_min", 0)  # rate limiting has its own unit tests
         app = create_app(make_settings(tmp_path, database_url=DB_URL, **kw), pgdb)
         app.state.rt.publisher = FakePublisher()
         return app

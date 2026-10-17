@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--tls-ca",
-        default=os.environ.get("MQTT_TLS_CA_FILE"),
+        default=os.environ.get("MQTT_CA_FILE"),
         help="CA certificate file: connect with TLS (broker port 8883) and verify the server",
     )
     ap.add_argument("--log-level", default="INFO")

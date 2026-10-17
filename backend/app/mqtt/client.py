@@ -91,8 +91,8 @@ class MqttService:
                     # and redelivers them (possible duplicates are absorbed by message_id)
                     clean_session=False,
                     tls_params=(
-                        aiomqtt.TLSParameters(ca_certs=str(s.mqtt_tls_ca_file))
-                        if s.mqtt_tls_ca_file
+                        aiomqtt.TLSParameters(ca_certs=str(s.mqtt_ca_file))
+                        if s.mqtt_ca_file
                         else None
                     ),
                 )

@@ -40,12 +40,24 @@ TABLE = [
     ("POST", "/tools/top-losses", "user"),
     ("POST", "/tools/valve-control", "admin"),
     ("POST", "/tools/weekly-report", "user"),
-    ("POST", "/demo/inject-fault", "admin"),
-    ("POST", "/demo/clear-fault", "admin"),
-    ("POST", "/demo/set-speed", "admin"),
-    ("GET", "/demo/status", "user"),
     ("GET", "/auth/me", "user"),
+    ("POST", "/auth/ws-ticket", "user"),
+    ("POST", "/auth/logout-all", "user"),
     ("PUT", f"/auth/users/{UID}/role", "admin"),
+    ("POST", "/societies", "admin"),
+    ("PATCH", f"/societies/{FID}", "admin"),
+    ("DELETE", f"/societies/{FID}", "admin"),
+    ("POST", "/flats", "admin"),
+    ("PATCH", f"/flats/{FID}", "admin"),
+    ("DELETE", f"/flats/{FID}", "admin"),
+    ("GET", "/users", "admin"),
+    ("POST", "/users", "admin"),
+    ("GET", f"/users/{UID}", "admin"),
+    ("PATCH", f"/users/{UID}", "admin"),
+    ("PUT", f"/users/{UID}/binding", "admin"),
+    ("POST", f"/users/{UID}/reset-password", "admin"),
+    ("POST", f"/users/{UID}/logout-all", "admin"),
+    ("GET", "/users/by-username/somebody", "admin"),  # admin OR service account
 ]
 IDS = [f"{m} {p.replace(FID, '{id}').replace(UID, '{uid}')}" for m, p, _ in TABLE]
 
@@ -90,11 +102,19 @@ async def test_health_is_public(client, method, path):
     assert r.status_code == 200
 
 
-async def test_login_and_register_are_public(client):
+async def test_health_details_is_admin_only(client, world):
+    assert (await client.get("/health/details")).status_code == 401
+    assert (await client.get("/health/details", headers=world.resident)).status_code == 403
+    assert (await client.get("/health/details", headers=world.maintenance)).status_code == 403
+    assert (await client.get("/health/details", headers=world.admin)).status_code == 200
+
+
+async def test_login_is_public_and_registration_is_closed_by_default(client):
     assert (
         await client.post(f"{API}/auth/login", json={"username": "a", "password": "b"})
     ).status_code == 401
     r = await client.post(
-        f"{API}/auth/register", json={"username": "pub_user", "password": "Passw0rd99", "name": "P"}
+        f"{API}/auth/register",
+        json={"username": "pub_user", "password": "Passw0rd99xyz", "name": "P"},
     )
-    assert r.status_code == 201
+    assert r.status_code == 404

@@ -38,4 +38,4 @@ Rotating `MQTT_DEVICE_SECRET` and restarting the broker rotates every device pas
   image was not tested).
 * Dev certificates: `sh infra/scripts/gen-dev-certs.sh [dir]` (local CA + server cert, 30 days, output is
   git-ignored). Clients: `mosquitto_pub --cafile ca.crt -h localhost -p 8883 ...`, backend
-  `MQTT_TLS_CA_FILE`/`mqtt_tls_ca_file`, simulator `--tls-ca`.
+  `MQTT_CA_FILE`, simulator `--tls-ca` / `MQTT_CA_FILE` (the broker-side `MQTT_TLS_CA_FILE` is a different thing).

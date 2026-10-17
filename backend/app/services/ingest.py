@@ -67,6 +67,11 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
         if len(payload) > MAX_PAYLOAD_BYTES:
             _fail(rt, counter, topic, "oversize_payload")
             return
+        if not _allow(rt, parsed):
+            rt.counters["rate_limited"] += 1
+            if rt.counters["rate_limited"] % 100 == 1:  # keep the dead-letter ring useful
+                rt.dead_letter(topic, "rate_limited")
+            return
         try:
             if parsed.kind == "flow":
                 await handle_flow(rt, parsed, payload)
@@ -81,6 +86,33 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
             _fail(rt, counter, topic, f"error:{type(exc).__name__}")
     except Exception:  # last line of defence for the MQTT loop
         log.exception("ingest_dispatch_failed")
+
+
+def _allow(rt: Runtime, parsed: ParsedTopic) -> bool:
+    """Token bucket per device: refill mqtt_device_rate_per_min/min, burst max(10, rate/4)."""
+    rate = rt.settings.mqtt_device_rate_per_min
+    if rate <= 0:
+        return True
+    key = (parsed.slug, parsed.unit)
+    now = time.monotonic()
+    cap = max(10.0, rate / 4)
+    tokens, last = rt.rate_buckets.get(key, (cap, now))
+    tokens = min(cap, tokens + (now - last) * rate / 60.0)
+    if len(rt.rate_buckets) >= FLAT_CACHE_MAX:
+        rt.rate_buckets.clear()
+    if tokens < 1.0:
+        rt.rate_buckets[key] = (tokens, now)
+        return False
+    rt.rate_buckets[key] = (tokens - 1.0, now)
+    return True
+
+
+def check_reading_age(rt: Runtime, ts: datetime, now: datetime) -> None:
+    """Reject stale readings. (Too-far-future ones are rejected by the payload validator.)"""
+    max_age = rt.settings.mqtt_max_reading_age_s
+    if (now - ts).total_seconds() > max_age:
+        rt.counters["stale_reading"] += 1
+        raise IngestError("stale_reading")
 
 
 def _parse(model: type[M], payload: bytes, max_future_skew_s: float | None = None) -> M:
@@ -121,6 +153,7 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     data = _parse(FlowPayload, payload, rt.settings.mqtt_max_future_skew_s)
     ts = datetime.fromtimestamp(data.ts, UTC)
     now = datetime.now(UTC)
+    check_reading_age(rt, ts, now)
     try:
         async with rt.db.session() as session:
             flat_id, society_id = await _flat_ids(rt, session, parsed)
@@ -149,7 +182,11 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
     await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
-    await maybe_detect(rt, flat_id, ts)
+    # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
+    # future beyond the configured skew (accelerated demo simulator), so a stale or forged ts
+    # can never move the detection window
+    horizon = now + timedelta(seconds=rt.settings.mqtt_max_future_skew_s)
+    await maybe_detect(rt, flat_id, max(now, min(ts, horizon)))
 
 
 async def handle_heartbeat(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
@@ -281,3 +318,37 @@ async def run_maintenance(rt: Runtime, now: datetime | None = None) -> None:
         await refresh_sensor_health(rt, now)
     except Exception:
         log.exception("maintenance_failed")
+
+
+async def backfill_readings(
+    session,
+    flat: Flat,
+    rows: list[tuple[datetime, float, float, str]],
+    *,
+    actor: str,
+) -> int:
+    """ADMIN-ONLY history import (never reachable from MQTT): store (timestamp, flow_rate,
+    volume, message_id) rows idempotently, skipping the live-ingest age window and detection.
+    The caller must have authorised ``actor`` as an admin. Returns the number of new rows."""
+    repo = ReadingRepository(session)
+    added = 0
+    for ts, flow, vol, mid in rows:
+        reading = FlowReading(
+            flat_id=flat.id,
+            timestamp=ts,
+            flow_rate=flow,
+            volume=vol,
+            message_id=mid.lower(),
+            received_at=datetime.now(UTC),
+        )
+        added += int(await repo.add_idempotent(reading))
+    await AuditRepository(session).record(
+        entity_type="flat",
+        entity_id=flat.id,
+        action="readings_backfilled",
+        actor=actor,
+        details={"rows": len(rows), "added": added},
+        flat_id=flat.id,
+        society_id=flat.society_id,
+    )
+    return added
