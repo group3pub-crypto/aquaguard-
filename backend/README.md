@@ -47,29 +47,160 @@ lifecycle, MQTT reconnect + resubscribe, at-least-once redelivery, device ACL. C
 
 Ingest tuning (env): `MQTT_WORKER_CONCURRENCY` (16), `DETECT_MAX_CONCURRENCY` (2, ML runs are
 shed when saturated), `DETECT_DEBOUNCE_SECONDS` (30), `MQTT_MAX_FUTURE_SKEW_S` (300; raise for the
-accelerated demo simulator). Measured throughput: `docs/performance.md`.
+accelerated edge simulator). Measured throughput: `docs/performance.md`.
+
+## First start (no data is ever seeded)
+
+A fresh database is empty and the API has no unauthenticated way to create anything. Bootstrap
+with the CLI, then onboard through the admin API:
+
+```bash
+alembic upgrade head
+python -m app.cli create-admin --username admin          # prompts twice on a TTY ...
+printf '%s\n' "$PW" | python -m app.cli create-admin --username admin --password-stdin   # ... or stdin
+# passwords are NEVER read from argv; policy: >= 12 chars, a letter and a digit, <= 72 BYTES
+```
+
+Then, as that admin (`POST /api/v1/auth/login`): `POST /societies`, `POST /flats` (the sensor id
+defaults to the device username `<slug>.<unit>`), `POST /users` (+ `PUT /users/{id}/binding`).
+Per sensor, print the broker credentials ONCE (nothing is written into `infra/`):
+
+```bash
+python -m app.cli provision-sensor --society green-valley --unit 101
+# -> device username, secret, the exact `mosquitto_passwd -b ...` command and the ACL snippet
+python -m app.cli retention-run [--dry-run]               # also runs daily on the leader
+```
+
+`scripts/dev_bootstrap.sh` strings these together for local development (NOT for production).
+
+## Roles, scoping and who may do what
+
+| Role | Sees | May act |
+|---|---|---|
+| `admin` | everything | everything, incl. valves, overrides, onboarding, users |
+| `maintenance` | flats, readings, alerts, anomalies, stats and reports of THEIR society (`users.society_id`) | acknowledge / snooze / resolve alerts in that society |
+| `resident` | ONLY their bound flat (`users.flat_id`) + the read-only name/address of its society | nothing (read-only) |
+| unbound (no flat / society) | nothing: empty lists, 404 for ids | nothing |
+
+Scope is applied **in SQL** on every route (`app/scope.py`; list endpoints are filtered, not
+post-filtered) and an out-of-scope id answers **404**, never 403, so existence does not leak.
+`/tools/*` obey the same scope; society-wide aggregates (`/societies/{id}/stats`,
+`/tools/top-losses`, `/tools/weekly-report`) are staff-only. `tests/test_scope_matrix.py`
+enumerates `app.routes`, FAILS for a route without a declared policy (`Depends(get_scope)`,
+`AdminUser`, `SelfRoute`, `PublicRoute`, ...) and attacks every data route as a resident of
+another flat, an unbound user and staff of another society.
+
+Self-registration is OFF (`ALLOW_SELF_REGISTRATION=false` => 404). When enabled it creates an
+UNBOUND resident that sees nothing until an admin binds it.
+
+## Authentication lifecycle
+
+* `POST /auth/login` -> `{access_token, refresh_token, expires_in, refresh_expires_in, role}`.
+  Access tokens live `ACCESS_TOKEN_MINUTES` (15) and carry `tv` (the user's `token_version`),
+  checked against the DB on every request: role change, deactivation, password change/reset and
+  "logout everywhere" take effect immediately.
+* `POST /auth/refresh {refresh_token}` rotates (the old token is spent). Presenting a spent token
+  revokes its whole family (theft detection). Refresh tokens are opaque, stored as SHA-256.
+* `POST /auth/logout {refresh_token}` (this device), `POST /auth/logout-all`,
+  `POST /auth/change-password {current_password,new_password}` (returns a fresh pair),
+  admin: `POST /users/{id}/reset-password`, `POST /users/{id}/logout-all`.
+* Usernames are case-insensitive (stored lowercase). Login failures are identical for unknown
+  user / wrong password / inactive / locked. After `LOGIN_MAX_FAILURES` (10) failures within 15
+  min the account is locked for 15 min. Rate limit key = IP + username (`RATE_LIMIT_STORAGE_URI`).
+* The last active admin can never be demoted/deactivated (409).
+* **Service accounts** (`users.is_service`, e.g. the Telegram bot) may send `on_behalf_of` (<= 100
+  chars) on alert acknowledge/snooze/override/resolve, valve open/close and `/tools/valve-control`.
+  It is stored in `audit_log.details` and echoed as `on_behalf_of` + `on_behalf_of_verified:false`:
+  asserted, NOT verified. Everyone else sending it gets 422. The audit ACTOR is always the
+  authenticated username; `acknowledged_by` / `snoozed_by` / `issued_by` / ... in bodies are ignored.
+* `GET /users/by-username/{username}` (admin or service account) lets the bot verify `/link`.
+
+## WebSocket
+
+1. `POST /api/v1/auth/ws-ticket` (Bearer) -> `{ticket, expires_in: 30}`: single use, bound to the
+   user, their `token_version` and data scope, stored hashed in `ws_tickets`.
+2. Connect to `/api/v1/ws/live?ticket=<ticket>[&flat_id=..&society_id=..]`. `?token=<JWT>` is no
+   longer accepted. The server re-reads the user, filters every event by the connection's scope
+   (client filters can only narrow), drops the socket when the user is deactivated / logged out
+   (checked every `WS_REVALIDATE_S`), pings `{"type":"ping"}` every `WS_PING_INTERVAL_S` and closes
+   idle clients after `WS_IDLE_TIMEOUT_S` (any client frame, e.g. text `ping` -> `pong`, counts).
+3. Close codes: `4401` auth, `4403` empty scope (unbound), `4429` connection cap
+   (`WS_MAX_PER_USER`, `WS_MAX_CONNECTIONS`), `4408` idle.
+
+## Alert / valve safety
+
+* New alerts start at tier <= 3. Dedupe: same flat + anomaly type with the same ongoing anomaly or
+  activity in the last 30 min => one alert; a severity increase re-evaluates the tier (an
+  acknowledged / snoozed alert re-opens only on an increase that reaches a higher tier).
+* While a flat's baseline is `learning` nothing escalates above tier 2 ("alert") and the alert text
+  and audit say so. `ready` needs >= 14 distinct days AND every one of the 168 hour-of-week slots
+  with >= `MIN_SLOT_SAMPLES` (30) samples; `ready` -> `stale` after 30 days without retraining.
+* **Automatic shut-off** needs: leak/burst, confidence >= 0.85, severity >= 0.9, 6 h at "ticket",
+  baseline not learning, recent data and no active water use (any 15-min slice of the last
+  `ACTIVE_USE_WINDOW_MIN` = 60 min with regularly stopping flow). Then:
+  1. `shutoff_warned_at` set, audit + WS `shutoff_warning` (staff / resident can cancel by
+     acknowledging, snoozing, overriding or resolving);
+  2. after `SHUTOFF_WARNING_SECONDS` (300) the guards are re-evaluated; if they still hold the
+     command row is **committed (pending) and only then published**;
+  3. the alert becomes tier 4 / `auto_shutoff` (and the resident is told) **only after the device
+     ack confirms** (`valve_commands.status=confirmed`). A late ack of a timed-out command counts.
+  4. publish failure / no ack within `VALVE_ACK_TIMEOUT_S` (60): the alert stays at "ticket", the
+     close is retried exactly once, then we give up, audit `shutoff_failed` and send a WS `alert`
+     event `shutoff_failed` so staff close the valve by hand.
+* Escalation: one query selects due alerts (keyset pages, no cap), one transaction + `FOR UPDATE
+  SKIP LOCKED` per alert. The maintenance loop runs only on the leader (PostgreSQL advisory lock on
+  a dedicated connection; SQLite always leads). SIGTERM: the in-flight cycle finishes (bounded by
+  `SHUTDOWN_GRACE_S`), then MQTT and the DB close.
+* Retention: `READINGS_RETENTION_DAYS` (90, 0 = off) and `AUDIT_RETENTION_DAYS` (0 = off), deleted
+  in batches of `RETENTION_BATCH_SIZE` daily on the leader or via `retention-run`.
+
+## Operations endpoints
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /health` | none | `{"status":"ok"|"degraded"}` only |
+| `GET /health/ready` | none | 503 unless DB reachable AND alembic revision == head AND (MQTT connected OR `MQTT_REQUIRED=false`) |
+| `GET /health/details` | admin | counters, dead letters, MQTT state, model status, migration, uptime, leader |
+| `GET /metrics` | `Bearer $METRICS_TOKEN` | `METRICS_ENABLED=true` only (404 otherwise): `ingest_messages_total{result}`, `detection_seconds`, `alerts_total{tier}`, `ws_connections`, `mqtt_connected`, `maintenance_leader` |
+
+`/docs`, `/redoc`, `/openapi.json` are off in production unless `ENABLE_DOCS=true`. `X-Request-ID`
+is kept only if it matches `[A-Za-z0-9._-]{1,64}`. The image is built from the REPO ROOT:
+`docker build -f backend/Dockerfile .` (ignore rules: `backend/Dockerfile.dockerignore`).
+`docker-entrypoint.sh` honours `PORT`, `WEB_CONCURRENCY` and `FORWARDED_ALLOW_IPS` (default
+`127.0.0.1`, a wildcard is refused). With `WEB_CONCURRENCY > 1` set `RATE_LIMIT_STORAGE_URI` to a
+shared store (`pip install -e '.[redis]'`), otherwise limits are per process (logged loudly).
 
 ## Configuration (env)
 
-| Variable | Notes |
-|---|---|
-| `ENVIRONMENT` | `development` / `test` / `production` (default). |
-| `SECRET_KEY` | Required in production: >= 32 chars, not a placeholder. Dev/test: random per process. |
-| `ALLOWED_ORIGINS` | Comma separated CORS origins; `*` is rejected. |
-| `DATABASE_URL` | `postgresql+asyncpg://...` |
-| `MQTT_HOST/PORT/USERNAME/PASSWORD`, `MQTT_ENABLED` | Broker connection. |
-| `MODEL_DIR` | Default `<repo>/ml/models`. Missing models => rule-based detection. |
-| `DEMO_MODE` | Mounts `/api/v1/demo/*`. Needs `DEMO_ADMIN_PASSWORD` / `DEMO_RESIDENT_PASSWORD` in production. |
-| `SEED_DEMO_DATA` | Seeds 1 society, 6 flats, `admin` and `resident` users on startup (idempotent). |
-| `ACCESS_TOKEN_MINUTES`, `WS_MAX_CONNECTIONS`, `TIMEZONE`, `RATE_LIMIT_ENABLED` | See `app/config.py`. |
+| Variable | Default | Notes |
+|---|---|---|
+| `ENVIRONMENT` | `production` | `development` / `test` / `production`. |
+| `SECRET_KEY` | - | Production: >= 32 chars, >= 16 distinct, not a placeholder. Dev/test: random per process. |
+| `DATABASE_URL` | - | REQUIRED in production; default/placeholder DB passwords are rejected. |
+| `ALLOWED_ORIGINS` | - | Production: explicit `https://` origins, no `*`, not empty. |
+| `ACCESS_TOKEN_MINUTES` (legacy `ACCESS_TOKEN_EXPIRE_MINUTES`) | 15 | |
+| `REFRESH_TOKEN_DAYS` | 14 | |
+| `LOG_LEVEL` (legacy `BACKEND_LOG_LEVEL`) | INFO | Legacy names still work and log a deprecation warning. |
+| `ALLOW_SELF_REGISTRATION` | false | |
+| `LOGIN_MAX_FAILURES` / `LOGIN_LOCK_MINUTES` | 10 / 15 | |
+| `RATE_LIMIT_ENABLED`, `RATE_LIMIT_STORAGE_URI`, `WEB_CONCURRENCY`, `FORWARDED_ALLOW_IPS` | true, `memory://`, 1, `127.0.0.1` | |
+| `WS_MAX_CONNECTIONS`, `WS_MAX_PER_USER`, `WS_TICKET_TTL_S`, `WS_IDLE_TIMEOUT_S`, `WS_PING_INTERVAL_S`, `WS_REVALIDATE_S` | 200, 5, 30, 90, 30, 60 | |
+| `MQTT_HOST/PORT/USERNAME/PASSWORD`, `MQTT_ENABLED`, `MQTT_REQUIRED` | | `MQTT_REQUIRED=false` lets `/health/ready` pass without a broker. |
+| `MODEL_DIR`, `MODEL_MANIFEST_REQUIRED` | `<repo>/ml/models`, true in production | Missing models => rule-based detection. |
+| `VALVE_ACK_TIMEOUT_S`, `SHUTOFF_WARNING_SECONDS`, `ACTIVE_USE_WINDOW_MIN`, `MIN_SLOT_SAMPLES` | 60, 300, 60, 30 | |
+| `READINGS_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `RETENTION_BATCH_SIZE` | 90, 0, 5000 | |
+| `MAINTENANCE_INTERVAL_S`, `SHUTDOWN_GRACE_S` | 60, 20 | |
+| `METRICS_ENABLED`, `METRICS_TOKEN` | false, - | Enabling needs a token of >= 24 chars. |
+| `ENABLE_DOCS` | false in production | |
+| `TIMEZONE`, `DETECT_DEBOUNCE_SECONDS` | UTC, 30 | See `app/config.py` for the rest. |
 
 ## Notes
 
 - All DB access goes through `app/repositories`; services and routers never build queries.
-- Auth: JWT (HS256). Roles are read from the DB on each request, so role changes apply at once.
-  Self-registration always creates `resident`. WebSocket: `/api/v1/ws/live?token=<JWT>`.
 - Hour-of-week slots, "night" and forecast features use `TIMEZONE` (default UTC).
 - Forecast target is the mean flow rate in L/min per hour (not litres per hour); litres = L/min x 60.
+- The flow payload accepts the optional firmware fields `tot`, `vbat`, `valve`, `fw`, `err`
+  (validated in `app/schemas/mqtt.py`); ingest will persist them in a later change.
 
 ## LLM-written alert text (optional, off by default)
 

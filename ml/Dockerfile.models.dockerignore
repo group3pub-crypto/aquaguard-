@@ -1,0 +1,14 @@
+# Allow-list for `docker build -f ml/Dockerfile.models .` (context = repo root).
+*
+!ml/__init__.py
+!ml/features
+!ml/scripts
+!ml/pyproject.toml
+!libs/aquaguard_features
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+ml/models
+ml/data

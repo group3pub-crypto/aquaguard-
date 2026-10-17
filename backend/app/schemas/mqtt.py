@@ -47,7 +47,7 @@ class FlowPayload(BaseModel):
     @classmethod
     def _not_future(cls, v: float, info: ValidationInfo) -> float:
         # the allowed skew comes from Settings.mqtt_max_future_skew_s (validation context); the
-        # accelerated demo simulator runs ahead of wall clock and needs a larger value
+        # accelerated edge simulator (--speed > 1) runs ahead of wall clock and needs a larger value
         skew = (info.context or {}).get("max_future_skew_s", MAX_FUTURE_SKEW_S)
         if v > time.time() + skew:
             raise ValueError("timestamp is in the future")

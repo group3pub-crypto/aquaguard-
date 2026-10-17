@@ -141,7 +141,7 @@ class Settings(BaseSettings):
     # admin-only ingest.backfill_readings() path, never through MQTT
     mqtt_max_reading_age_s: float = Field(600.0, ge=1)
     # per-device message budget (token bucket, per minute); 0 disables. Raise it for the
-    # accelerated demo simulator, which emits one reading per simulated minute.
+    # accelerated edge simulator (--speed > 1), which emits one reading per simulated minute.
     mqtt_device_rate_per_min: int = Field(120, ge=0)
     mqtt_ca_file: Path | None = None  # set => TLS to the broker, verified against this CA
     mqtt_worker_concurrency: int = Field(16, ge=1, le=256)

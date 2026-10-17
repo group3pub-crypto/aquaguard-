@@ -9,8 +9,10 @@
 // ---- MQTT over TLS (port 8883). See docs/hardware/mqtt-tls-setup.md ----------------------
 #define MQTT_HOST       "broker.example.local"
 #define MQTT_PORT       8883
-// Per-device broker account (from `python -m app.cli provision-sensor`, being added by the
-// backend work; or infra/mosquitto/device_password.sh <society>/<unit>). Username form: "<society>/<unit>".
+// Per-device broker account. Use EXACTLY the username your provisioning method prints:
+//  - `python -m app.cli provision-sensor` prints "<society>.<unit>" (dot)
+//  - infra/mosquitto (MQTT_DEVICES + device_password.sh) and the simulator use "<society>/<unit>" (slash)
+// These two currently disagree; see docs/hardware/provisioning.md.
 #define MQTT_USER       "demo/101"
 #define MQTT_PASSWORD   "CHANGE_ME"
 // PEM of the CA that signed the broker certificate (public data, not a secret).

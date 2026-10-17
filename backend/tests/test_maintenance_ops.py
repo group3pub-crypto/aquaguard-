@@ -71,12 +71,8 @@ async def test_only_one_instance_leads_and_failover_happens_on_connection_loss()
     assert await a.acquire() is True  # still leader, cheap liveness probe
     a._conn.alive = False  # a's dedicated connection dies -> PostgreSQL drops the lock
     server.holder = None
-    assert await a.acquire() is True or True  # a re-elects itself or b may win ...
-    # force the interesting order: lock freed, b polls first
-    server.holder = None
-    a2 = LeaderLock(FakeDb(server))  # type: ignore[arg-type]
-    assert await b.acquire() is True
-    assert await a2.acquire() is False
+    assert await b.acquire() is True  # the follower takes over
+    assert await a.acquire() is False  # the old leader notices, reconnects and loses the race
 
 
 async def test_release_unlocks_and_closes_the_dedicated_connection():

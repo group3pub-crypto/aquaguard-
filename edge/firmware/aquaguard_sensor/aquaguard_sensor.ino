@@ -380,6 +380,13 @@ void loop() {
     in.rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 1000;
     g_node.tick(in);
     syncRelay();
+    static uint32_t lastLogS = 0;  // calibration aid: raw pulse counter (see hil-test-plan.md)
+    if (in.mono_s - lastLogS >= 10) {
+      lastLogS = in.mono_s;
+      Serial.printf("flow win=%.2f L/min session_pulses=%llu valve=%s ring=%u\n", g_node.flow().windowLpm(),
+                    (unsigned long long)g_node.flow().sessionPulses(), g_node.valve().stateName(),
+                    (unsigned)g_node.ring().size());
+    }
   }
   publishPending();
   delay(5);

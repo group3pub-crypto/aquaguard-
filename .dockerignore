@@ -1,0 +1,31 @@
+# Fallback ignore rules for builds whose context is the repo root. BuildKit prefers a
+# <Dockerfile>.dockerignore next to each Dockerfile (backend/, edge/, ml/ have one); this file
+# covers any other root-context build.
+.git
+.github
+.env
+.env.*
+!.env.example
+.dev-certs
+**/.env
+**/.env.*
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/coverage.xml
+**/htmlcov
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+ml/models/*
+!ml/models/.gitkeep
+ml/data
+**/*.joblib
+**/*.parquet
+**/*.log
+backups
+docs

@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+# Trained-model image: trains the leak detector + demand forecaster at BUILD time and ships the
+# artefacts (plus manifest.json with SHA-256 hashes) as a tiny image. The `models-init` compose
+# service copies /models into the `models` named volume, which the backend mounts READ-ONLY with
+# MODEL_DIR=/models and MODEL_MANIFEST_REQUIRED=true.
+#
+# !! The shipped models are trained on SYNTHETIC data (ml/scripts/generate_data.py). They are a
+# !! starting point, not a calibrated production model: recalibrate with real readings
+# !! (ml/scripts/train_from_export.py) and read ml/reports/ (benchmark.md when present) before
+# !! relying on any number.
+#
+# Why `FROM <backend image>`: joblib files are pickles, so they must be produced by the SAME
+# Python / scikit-learn / numpy as the process that loads them. Training on top of the backend
+# image guarantees that; the build then loads every file and re-checks the manifest with the
+# backend's own verifier, so an incompatible pair can never ship.
+#
+# Build context is the REPO ROOT (allow-list: ml/Dockerfile.models.dockerignore):
+#   docker build -f backend/Dockerfile -t aquaguard-backend .
+#   docker build -f ml/Dockerfile.models --build-context backend=docker-image://aquaguard-backend \
+#       -t aquaguard-models .
+# docker compose wires this up via `additional_contexts: {backend: service:backend}`; release
+# builds pass --build-arg BACKEND_IMAGE=ghcr.io/<org>/aquaguard-backend@sha256:<digest>.
+ARG BACKEND_IMAGE=backend
+ARG BUSYBOX_IMAGE=busybox:1.37.0
+
+FROM ${BACKEND_IMAGE} AS train
+USER root
+ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONPATH=/work
+# training-only dependencies (not in the runtime image)
+RUN pip install "pandas>=2.1" "pyarrow>=14"
+WORKDIR /work
+COPY ml/__init__.py ml/__init__.py
+COPY ml/features ml/features
+COPY ml/scripts ml/scripts
+
+# Defaults = the documented default training config (about a minute on a laptop CPU).
+ARG ML_SEED=42
+ARG ML_FLATS=12
+ARG ML_DAYS=30
+RUN mkdir /models /reports \
+ && python -m ml.scripts.train_detector --seed "$ML_SEED" --flats "$ML_FLATS" --days "$ML_DAYS" \
+        --out /models --report-dir /reports \
+ && python -m ml.scripts.train_forecaster --seed "$ML_SEED" --flats "$ML_FLATS" --days "$ML_DAYS" \
+        --out /models --report-dir /reports \
+ && test -s /models/manifest.json
+
+# Fail the build unless every artefact unpickles AND matches the manifest (backend's verifier).
+RUN python - <<'PY'
+import json
+import pathlib
+
+import joblib
+from app.services.detector import verify_manifest
+
+d = pathlib.Path("/models")
+files = sorted(json.loads((d / "manifest.json").read_text())["files"])
+assert files, "empty manifest"
+for name in files:
+    status = verify_manifest(d, name)
+    assert status == "ok", f"{name}: manifest {status}"
+    if name.endswith(".joblib"):
+        joblib.load(d / name)
+print("verified", len(files), "model files")
+PY
+
+FROM ${BUSYBOX_IMAGE} AS models
+LABEL org.opencontainers.image.title="aquaguard-models" \
+      org.opencontainers.image.description="Detector + forecaster trained on SYNTHETIC data; recalibrate before production reliance"
+COPY --from=train /models /models
+COPY --from=train /reports /reports
+USER 0:0
+# models-init: replace the volume content atomically-enough (rm + cp) on every start/upgrade
+CMD ["sh", "-c", "set -e; rm -rf /target/* /target/.[!.]* 2>/dev/null || true; cp -a /models/. /target/; ls -l /target"]

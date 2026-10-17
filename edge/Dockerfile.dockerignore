@@ -1,0 +1,6 @@
+# Allow-list for `docker build -f edge/Dockerfile .` (context = repo root).
+*
+!edge/__init__.py
+!edge/simulator
+**/__pycache__
+**/*.pyc
