@@ -26,9 +26,9 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.auth import Principal, Role
 from bot.deps import Deps, send
 from bot.fsutil import atomic_write_json
-from bot.auth import Principal, Role
 from bot.tools.alerts import fmt_alert, fmt_shutoff_failed, fmt_shutoff_warning
 from bot.tools.scope import can_see_alert
 
@@ -137,6 +137,14 @@ async def _deliver(bot: Any, deps: Deps, chat_id: int, text: str, **kw: Any) -> 
 Keyboard = Callable[[Principal], InlineKeyboardMarkup | None]
 
 
+def _const(kb: InlineKeyboardMarkup) -> Keyboard:
+    return lambda _p: kb
+
+
+def _warning_kb(alert_id: str) -> Keyboard:
+    return lambda p: warning_keyboard(alert_id, p.role)
+
+
 async def _push(
     bot: Any,
     deps: Deps,
@@ -175,19 +183,17 @@ async def poll_once(bot: Any, deps: Deps, seen: SeenStore) -> int:
         if key not in seen:
             unit = await deps.api.unit_label(a["flat_id"])
             delivered += await _push(
-                bot, deps, seen, key, recipients, a, fmt_alert(a, unit), lambda _p: alert_keyboard(aid, state)
+                bot, deps, seen, key, recipients, a, fmt_alert(a, unit), _const(alert_keyboard(aid, state))
             )
         if wkey and wkey not in seen:
             unit = unit or await deps.api.unit_label(a["flat_id"])
             text = fmt_shutoff_warning(a, unit)
-            delivered += await _push(
-                bot, deps, seen, wkey, recipients, a, text, lambda p: warning_keyboard(aid, p.role)
-            )
+            delivered += await _push(bot, deps, seen, wkey, recipients, a, text, _warning_kb(aid))
         if fkey and fkey not in seen:
             unit = unit or await deps.api.unit_label(a["flat_id"])
             text = fmt_shutoff_failed(a, unit)
             delivered += await _push(
-                bot, deps, seen, fkey, recipients, a, text, lambda _p: alert_keyboard(aid, "ticket"), staff_only=True
+                bot, deps, seen, fkey, recipients, a, text, _const(alert_keyboard(aid, "ticket")), staff_only=True
             )
     delivered += await _digest(bot, deps, seen, recipients)
     seen.save()

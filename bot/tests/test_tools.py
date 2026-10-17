@@ -138,11 +138,30 @@ async def test_maintenance_can_act_but_not_valve(deps, sim):
     assert "Active alerts: 3" in await deps.registry.call("system_status", {}, m, deps.api)
 
 
-async def test_ack_snooze_send_no_actor_fields(deps, sim):
-    await deps.registry.call("acknowledge_alert", {"alert_id": AL1}, P(MAINT, deps), deps.api)
-    await deps.registry.call("snooze_alert", {"alert_id": AL1}, P(MAINT, deps), deps.api)
+async def test_actions_send_on_behalf_of_and_no_dead_fields(deps, sim):
+    m = P(MAINT, deps)
+    out = await deps.registry.call("acknowledge_alert", {"alert_id": AL1}, m, deps.api)
+    await deps.registry.call("snooze_alert", {"alert_id": AL1}, m, deps.api)
+    await deps.registry.call("resolve_alert", {"alert_id": AL1}, m, deps.api)
     bodies = [b for _, p, _, b in sim.calls if "/alerts/" in p]
-    assert bodies == [{}, {"duration_minutes": 60}]
+    assert bodies == [
+        {"on_behalf_of": "telegram:3"},
+        {"duration_minutes": 60, "on_behalf_of": "telegram:3"},
+        {"on_behalf_of": "telegram:3"},
+    ]
+    dead = {"acknowledged_by", "snoozed_by", "resolved_by", "overridden_by", "issued_by"}
+    assert not any(dead & set(b) for b in bodies)
+    # the backend's echo is surfaced, labelled as asserted
+    assert "telegram:3" in out and "not verified" in out
+
+
+async def test_on_behalf_of_is_clamped_to_100_chars(sim):
+    api = make_api(sim)
+    await api.ack_alert(AL1, "telegram:" + "9" * 200)
+    body = next(b for _, p, _, b in sim.calls if p.endswith("/acknowledge"))
+    assert len(body["on_behalf_of"]) == 100
+    await api.ack_alert(AL1)
+    assert [b for _, p, _, b in sim.calls if p.endswith("/acknowledge")][-1] == {}
 
 
 async def test_alert_callback_writes_bot_audit(deps, tmp_path):
@@ -167,7 +186,9 @@ async def test_valve_confirm_flow_single_use(deps, sim):
     out = await callbacks.dispatch(deps, ADMIN, parts, chat_id=ADMIN, message_id=500)
     assert "close" in out
     call = next(b for _, p, _, b in sim.calls if p.endswith("valve-control"))
-    assert call["issued_by"] == "telegram:1" and call["flat_id"] == F101
+    assert call["on_behalf_of"] == "telegram:1" and call["flat_id"] == F101
+    assert "issued_by" not in call
+    assert "telegram:1" in out and "NOT confirmed" in out  # pending command: never "closed"
     again = await callbacks.dispatch(deps, ADMIN, parts, chat_id=ADMIN, message_id=500)
     assert "no longer valid" in again
     assert sum(p.endswith("valve-control") for _, p, _, _ in sim.calls) == 1
@@ -207,3 +228,24 @@ def test_intents():
     assert match_intent("water usage of a-101") == ("get_usage_summary", {"unit": "A-101"})
     assert match_intent("my usage") == ("get_usage_summary", {})
     assert match_intent("hello") is None
+
+
+async def test_override_button_admin_only_and_sends_on_behalf_of(deps, sim):
+    assert await callbacks.dispatch(deps, MAINT, ["alert", "override", AL1]) == "You are not allowed to do that."
+    assert await callbacks.dispatch(deps, RES, ["alert", "override", AL1]) == "You are not allowed to do that."
+    assert not any(p.endswith("/override") for _, p, _, _ in sim.calls)
+    out = await callbacks.dispatch(deps, ADMIN, ["alert", "override", AL1])
+    assert "overridden" in out and "telegram:1" in out
+    body = next(b for _, p, _, b in sim.calls if p.endswith("/override"))
+    assert body["on_behalf_of"] == "telegram:1" and body["reason"] and "overridden_by" not in body
+
+
+async def test_valve_confirmed_status_wording(deps):
+    from bot.tools.valve import set_valve
+
+    class Api:
+        async def set_valve(self, unit, action, obo):
+            return {"status": "confirmed", "on_behalf_of": obo}
+
+    out = await set_valve(Api(), {"unit": "A-101", "action": "close"}, P(ADMIN, deps))
+    assert "confirmed by the device" in out and "telegram:1" in out

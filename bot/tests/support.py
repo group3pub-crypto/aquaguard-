@@ -79,6 +79,8 @@ def alert(aid: str, flat: str, state: str, tier: int = 2, msg: str | None = "Pos
         "acknowledged_by": None,
         "acknowledged_at": None,
         "resolved_at": None,
+        "shutoff_warned_at": None,
+        "shutoff_gave_up_at": None,
         "created_at": "2026-10-16T10:00:00Z",
         "updated_at": "2026-10-16T10:00:00Z",
     }
@@ -95,13 +97,53 @@ LOSSES = {
 }
 REPORT_MD = "# Weekly water report: Towers\n_2026-10-09 to 2026-10-16_\n\n## Summary\n- Flats monitored: 2\n"
 STATS = {"society_id": SOC, "flats": 2, "active_alerts": 3, "volume_24h_l": 910.5, "sensors_offline": 1}
+USER_RES = {
+    "id": "dddddddd-0000-4000-8000-000000000001",
+    "username": "carol",
+    "name": "Carol",
+    "role": "resident",
+    "flat_id": F102,
+    "society_id": SOC,
+    "is_active": True,
+    "is_service": False,
+    "telegram_id": None,
+    "created_at": "2026-01-01T00:00:00Z",
+}
+USERS = {
+    "carol": USER_RES,
+    "mike": {
+        **USER_RES,
+        "id": "dddddddd-0000-4000-8000-000000000002",
+        "username": "mike",
+        "role": "maintenance",
+        "flat_id": None,
+    },
+    "root": {
+        **USER_RES,
+        "id": "dddddddd-0000-4000-8000-000000000003",
+        "username": "root",
+        "role": "admin",
+        "flat_id": None,
+    },
+    "svc": {
+        **USER_RES,
+        "id": "dddddddd-0000-4000-8000-000000000004",
+        "username": "svc",
+        "role": "maintenance",
+        "flat_id": None,
+        "is_service": True,
+    },
+    "nofl": {**USER_RES, "id": "dddddddd-0000-4000-8000-000000000005", "username": "nofl", "flat_id": None},
+}
 VALVE_CMD = {
     "id": AL1,
     "flat_id": F101,
     "alert_id": None,
     "command": "close",
     "source": "manual_bot",
-    "issued_by": "telegram:1",
+    "issued_by": "bot_service",
+    "on_behalf_of": None,
+    "on_behalf_of_verified": None,
     "issued_at": "2026-10-16T10:00:00Z",
     "confirmed_at": None,
     "status": "pending",
@@ -141,6 +183,8 @@ def check_request(method: str, path: str, query: dict[str, str], body: Any) -> N
     props = s.get("properties", {})
     assert set(body) <= set(props), f"{path}: unknown body keys {set(body) - set(props)}"
     assert set(s.get("required", [])) <= set(body), f"{path}: missing required keys"
+    dead = {k for k, v in props.items() if v.get("deprecated")}
+    assert not dead & set(body), f"{path}: sends dead (deprecated, ignored) fields {dead & set(body)}"
     for k, v in body.items():
         spec = props[k]
         if "maximum" in spec:
@@ -174,19 +218,82 @@ def check_response(method: str, path: str, payload: Any) -> None:
         assert not extra, f"{path}: fixture keys not in backend schema: {extra}"
 
 
+class AuthSim:
+    """Backend token endpoints: 15-min access tokens, rotating refresh tokens, family revocation."""
+
+    def __init__(self) -> None:
+        self.n = 0
+        self.access: dict[str, str] = {}  # valid access token -> family
+        self.refresh: dict[str, str] = {}  # live refresh token -> family
+        self.spent: dict[str, str] = {}  # spent refresh token -> family
+        self.logins = 0
+        self.refreshes = 0
+        self.reuse_detected = 0
+        self.fail_login = False
+
+    def _issue(self, family: str) -> dict:
+        self.n += 1
+        at, rt = f"access-{self.n}", f"refresh-token-{self.n:08d}-padding"
+        self.access[at] = family
+        self.refresh[rt] = family
+        return {
+            "access_token": at,
+            "refresh_token": rt,
+            "token_type": "bearer",
+            "role": "admin",
+            "expires_in": 900,
+            "refresh_expires_in": 86400,
+        }
+
+    def login(self) -> httpx.Response:
+        self.logins += 1
+        if self.fail_login:
+            return httpx.Response(401, json={"detail": "Invalid credentials"})
+        return httpx.Response(200, json=self._issue(f"fam-{self.logins}"))
+
+    def do_refresh(self, token: str) -> httpx.Response:
+        self.refreshes += 1
+        if token in self.spent:  # reuse: the whole family is assumed stolen
+            self.reuse_detected += 1
+            fam = self.spent[token]
+            self.refresh = {t: f for t, f in self.refresh.items() if f != fam}
+            self.access = {t: f for t, f in self.access.items() if f != fam}
+            return httpx.Response(401, json={"detail": "Invalid refresh token"})
+        fam = self.refresh.pop(token, None)
+        if fam is None:
+            return httpx.Response(401, json={"detail": "Invalid refresh token"})
+        self.spent[token] = fam
+        return httpx.Response(200, json=self._issue(fam))
+
+    def expire_access(self) -> None:
+        self.access.clear()  # what 15 minutes do to every access token
+
+    def authorised(self, req: httpx.Request) -> bool:
+        return req.headers.get("authorization", "").removeprefix("Bearer ") in self.access
+
+
 class BackendSim:
     """httpx transport that serves real-shaped payloads and validates every request."""
 
     def __init__(self, alerts: list[dict] | None = None) -> None:
         self.alerts = alerts if alerts is not None else []
         self.calls: list[tuple[str, str, dict, Any]] = []
+        self.auth = AuthSim()
+        self.telegram_ids: dict[str, int] = {}
+        self.patch_status = 200
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         p, m = req.url.path, req.method
         query = dict(req.url.params)
         body = json.loads(req.content) if req.content else None
         if p.endswith("/auth/login"):
-            return httpx.Response(200, json={"access_token": "t", "role": "admin", "expires_in": 60})
+            check_request(m, p, query, body)
+            return self.auth.login()
+        if p.endswith("/auth/refresh"):
+            check_request(m, p, query, body)
+            return self.auth.do_refresh(body["refresh_token"])
+        if not self.auth.authorised(req):
+            return httpx.Response(401, json={"detail": "Not authenticated"})
         check_request(m, p, query, body)
         self.calls.append((m, p, query, body))
         out: Any
@@ -194,6 +301,17 @@ class BackendSim:
             out = SOCIETIES
         elif p == "/api/v1/flats":
             out = FLATS
+        elif p.startswith("/api/v1/users/by-username/"):
+            user = USERS.get(p.rsplit("/", 1)[1])
+            if user is None:
+                return httpx.Response(404, json={"detail": "User not found"})
+            out = user
+        elif m == "PATCH" and p.startswith("/api/v1/users/"):
+            if self.patch_status != 200:
+                return httpx.Response(self.patch_status, json={"detail": "x"})
+            uid = p.rsplit("/", 1)[1]
+            self.telegram_ids[uid] = body["telegram_id"]
+            out = next(u for u in USERS.values() if u["id"] == uid) | {"telegram_id": body["telegram_id"]}
         elif p == "/api/v1/alerts":
             out = [
                 a
@@ -217,17 +335,27 @@ class BackendSim:
         elif p == "/api/v1/tools/weekly-report":
             out = {"society_id": SOC, "markdown": REPORT_MD}
         elif p == "/api/v1/tools/valve-control":
-            out = VALVE_CMD
+            obo = body.get("on_behalf_of")
+            out = {**VALVE_CMD, "on_behalf_of": obo, "on_behalf_of_verified": False if obo else None}
         elif p.endswith("/stats"):
             out = STATS
-        else:
-            out = alert(AL1, F101, "acknowledged")
+        else:  # alert actions: AlertActionOut echoes the asserted on_behalf_of
+            obo = (body or {}).get("on_behalf_of")
+            out = alert(AL1, F101, "acknowledged") | {
+                "on_behalf_of": obo,
+                "on_behalf_of_verified": False if obo else None,
+            }
         check_response(m, p, out)
         return httpx.Response(200, json=out)
 
 
-def make_api(sim: BackendSim) -> ApiClient:
-    return ApiClient("http://backend", "bot", "pw", transport=httpx.MockTransport(sim))
+async def _no_sleep(_: float) -> None:
+    return None
+
+
+def make_api(sim: BackendSim, clock: Any = None) -> ApiClient:
+    kw: dict[str, Any] = {"clock": clock} if clock else {}
+    return ApiClient("http://backend", "bot", "pw", transport=httpx.MockTransport(sim), sleep=_no_sleep, **kw)
 
 
 def make_deps(api: Any, tmp_path: Path | None = None) -> Deps:

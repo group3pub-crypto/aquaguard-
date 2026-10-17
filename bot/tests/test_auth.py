@@ -6,7 +6,7 @@ import pytest
 from bot.auth import MAX_PENDING, InvalidUsername, LinkStore, RateLimited, Role, TooManyPending
 from bot.formatting import escape_md
 from bot.handlers import commands
-from tests.support import ADMIN, F101, RES, STRANGER, BackendSim, ctx, make_api, make_deps, upd
+from tests.support import ADMIN, F101, F102, RES, STRANGER, USERS, BackendSim, ctx, make_api, make_deps, upd
 
 
 def test_role_ordering():
@@ -75,27 +75,87 @@ def test_legacy_unbound_links_fail_closed(tmp_path):
 
 
 async def test_link_and_approve_commands(tmp_path):
-    deps = make_deps(make_api(BackendSim()), tmp_path)
+    sim = BackendSim()
+    deps = make_deps(make_api(sim), tmp_path)
     u, c = upd(STRANGER), ctx(deps, ["carol"])
     await commands.link(u, c)
     rid = next(iter(deps.store.pending))
     note = c.bot.send_message.call_args.kwargs["text"]
     assert rid in note and c.bot.send_message.call_args.kwargs["chat_id"] == ADMIN
+    assert "A\\-102" in note  # flat comes from the backend record
     # non-admin cannot approve
-    u2 = upd(RES)
-    await commands.approve(u2, ctx(deps, [rid, "A-102"]))
+    await commands.approve(upd(RES), ctx(deps, [rid]))
     assert deps.store.principal_of(STRANGER) is None
-    # admin binds a flat resolved through the backend
-    c3 = ctx(deps, [rid, "a-102"])
+    # admin approves: role + flat come from the backend, telegram_id is written back
+    c3 = ctx(deps, [rid])
     await commands.approve(upd(ADMIN), c3)
     p = deps.store.principal_of(STRANGER)
-    assert p.role == Role.RESIDENT and p.unit == "A-102"
+    assert p.role == Role.RESIDENT and p.unit == "A-102" and p.flat_id == F102
     assert c3.bot.send_message.call_args.kwargs["chat_id"] == STRANGER
-    # unknown unit is refused
-    rid2 = deps.store.request_link(77, 77, "dave")
-    u4 = upd(ADMIN)
-    await commands.approve(u4, ctx(deps, [rid2, "Z-999"]))
+    assert sim.telegram_ids == {USERS["carol"]["id"]: STRANGER}
+    assert deps.store.links[STRANGER]["user_id"] == USERS["carol"]["id"]
+
+
+async def test_link_unknown_username_is_rejected_without_admin_ping(tmp_path):
+    deps = make_deps(make_api(BackendSim()), tmp_path)
+    u, c = upd(STRANGER), ctx(deps, ["nobody"])
+    await commands.link(u, c)
+    assert deps.store.pending == {}
+    c.bot.send_message.assert_not_called()
+    assert "could not be verified" in u.effective_message.reply_text.call_args.args[0]
+
+
+@pytest.mark.parametrize("name", ["root", "svc", "nofl"])
+async def test_link_ineligible_accounts_rejected(tmp_path, name):
+    deps = make_deps(make_api(BackendSim()), tmp_path)
+    c = ctx(deps, [name])
+    await commands.link(upd(STRANGER), c)
+    assert deps.store.pending == {}
+    c.bot.send_message.assert_not_called()
+
+
+async def test_link_account_claimed_by_other_telegram_rejected(tmp_path, monkeypatch):
+    monkeypatch.setitem(USERS, "carol", {**USERS["carol"], "telegram_id": 999})
+    deps = make_deps(make_api(BackendSim()), tmp_path)
+    await commands.link(upd(STRANGER), ctx(deps, ["carol"]))
+    assert deps.store.pending == {}
+
+
+async def test_approve_maintenance_from_backend_role_and_stale_account(tmp_path, monkeypatch):
+    sim = BackendSim()
+    deps = make_deps(make_api(sim), tmp_path)
+    await commands.link(upd(STRANGER), ctx(deps, ["mike"]))
+    rid = next(iter(deps.store.pending))
+    await commands.approve(upd(ADMIN), ctx(deps, [rid]))
+    p = deps.store.principal_of(STRANGER)
+    assert p.role == Role.MAINTENANCE and p.flat_id is None
+    # account deactivated between /link and /approve
+    await commands.link(upd(77), ctx(deps, ["carol"]))
+    rid2 = next(iter(deps.store.pending))
+    monkeypatch.setitem(USERS, "carol", {**USERS["carol"], "is_active": False})
+    u = upd(ADMIN)
+    await commands.approve(u, ctx(deps, [rid2]))
     assert deps.store.principal_of(77) is None
+    assert "inactive" in u.effective_message.reply_text.call_args.args[0]
+
+
+async def test_approve_survives_failed_telegram_id_writeback(tmp_path):
+    sim = BackendSim()
+    sim.patch_status = 403  # service account is not an admin
+    deps = make_deps(make_api(sim), tmp_path)
+    await commands.link(upd(STRANGER), ctx(deps, ["carol"]))
+    u = upd(ADMIN)
+    await commands.approve(u, ctx(deps, [next(iter(deps.store.pending))]))
+    assert deps.store.principal_of(STRANGER) is not None
+    assert "could not record" in u.effective_message.reply_text.call_args.args[0]
+
+
+async def test_old_two_argument_approve_is_refused(tmp_path):
+    deps = make_deps(make_api(BackendSim()), tmp_path)
+    await commands.link(upd(STRANGER), ctx(deps, ["carol"]))
+    rid = next(iter(deps.store.pending))
+    await commands.approve(upd(ADMIN), ctx(deps, [rid, "maintenance"]))
+    assert deps.store.principal_of(STRANGER) is None
 
 
 def test_escape_md():

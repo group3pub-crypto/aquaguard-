@@ -1111,6 +1111,53 @@
       ],
       "title": "Battery Pct"
      },
+     "battery_volts": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Battery Volts"
+     },
+     "device_valve_state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device Valve State"
+     },
+     "fault_codes": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fault Codes"
+     },
+     "firmware_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Firmware Version"
+     },
      "flat_id": {
       "format": "uuid",
       "title": "Flat Id",
@@ -1161,6 +1208,17 @@
       "format": "date-time",
       "title": "Timestamp",
       "type": "string"
+     },
+     "total_volume": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Total Volume"
      },
      "volume": {
       "title": "Volume",
