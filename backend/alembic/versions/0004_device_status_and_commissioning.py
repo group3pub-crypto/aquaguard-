@@ -32,7 +32,7 @@ def upgrade() -> None:
             ["flat_id"], ["flats.id"], name="fk_device_status_flat_id_flats", ondelete="CASCADE"
         ),
         sa.CheckConstraint(
-            "valve_reported IN ('open', 'closed')", name="ck_device_status_valve_reported"
+            "valve_reported IN ('open', 'closed')", name="valve_reported"
         ),
     )
     with op.batch_alter_table("flats") as batch:

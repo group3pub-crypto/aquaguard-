@@ -42,12 +42,26 @@ pytest tests/integration -m integration -v
 Covered: Alembic up/down/up and `alembic check` (no model drift), CHECK constraints / partial
 index predicates / ON DELETE actions vs the models, `updated_at` triggers, cascades, JSONB,
 unique constraints, pagination, concurrent duplicate and concurrent distinct ingest, the alert
-lifecycle, MQTT reconnect + resubscribe, at-least-once redelivery, device ACL. CI runs them in the
+lifecycle, MQTT reconnect + resubscribe, at-least-once redelivery, device ACL, advisory-lock
+leader election, `FOR UPDATE SKIP LOCKED` escalation concurrency, `ctid` retention batches, the
+`EXTRACT(epoch)` sensor-health SQL, single-use WS tickets / refresh rotation under concurrency and
+the username-lowercase migration on existing data. CI runs them in the
 `integration` job (`postgres:16` service + Mosquitto started with the same entrypoint).
 
 Ingest tuning (env): `MQTT_WORKER_CONCURRENCY` (16), `DETECT_MAX_CONCURRENCY` (2, ML runs are
 shed when saturated), `DETECT_DEBOUNCE_SECONDS` (30), `MQTT_MAX_FUTURE_SKEW_S` (300; raise for the
 accelerated edge simulator). Measured throughput: `docs/performance.md`.
+
+`DETECTION_POLICY` = `rules` | `ml` | `hybrid` (default). `hybrid` uses the deterministic rules as a
+gate and the RandomForest for class/confidence (and a veto when P(normal) > 0.5); without loaded,
+manifest-verified models every policy runs rules only, and `GET /health/details` -> `detection`
+shows `policy`, `effective` and the reason. The default may change after `ml/reports/benchmark.md`
+is reviewed on real data (the benchmark is synthetic).
+
+LLM alert text (optional, off by default): `LLM_ENABLED`, `ANTHROPIC_API_KEY`, `LLM_MODEL`, ... see
+`app/services/llm/settings.py`. An alert is always stored first with the template text
+(`message_source=template`); after the transaction commits a background task may replace it
+(`anthropic` or `template_fallback`). The LLM can never delay or prevent an alert.
 
 ## First start (no data is ever seeded)
 
@@ -61,13 +75,14 @@ printf '%s\n' "$PW" | python -m app.cli create-admin --username admin --password
 # passwords are NEVER read from argv; policy: >= 12 chars, a letter and a digit, <= 72 BYTES
 ```
 
-Then, as that admin (`POST /api/v1/auth/login`): `POST /societies`, `POST /flats` (the sensor id
-defaults to the device username `<slug>.<unit>`), `POST /users` (+ `PUT /users/{id}/binding`).
+Then, as that admin (`POST /api/v1/auth/login`): `POST /societies`, `POST /flats` (the sensor id is an inventory label,
+default `<slug>.<unit>`; the broker username is `<slug>/<unit>`), `POST /users` (+ `PUT /users/{id}/binding`).
 Per sensor, print the broker credentials ONCE (nothing is written into `infra/`):
 
 ```bash
 python -m app.cli provision-sensor --society green-valley --unit 101
-# -> device username, secret, the exact `mosquitto_passwd -b ...` command and the ACL snippet
+# -> device username (green-valley/101), secret, the `mosquitto_passwd -b ...` command and the
+#    ACL lines (identical to infra/mosquitto/acl.device.template); sensor_id is not modified
 python -m app.cli retention-run [--dry-run]               # also runs daily on the leader
 ```
 
@@ -135,7 +150,11 @@ UNBOUND resident that sees nothing until an admin binds it.
 * While a flat's baseline is `learning` nothing escalates above tier 2 ("alert") and the alert text
   and audit say so. `ready` needs >= 14 distinct days AND every one of the 168 hour-of-week slots
   with >= `MIN_SLOT_SAMPLES` (30) samples; `ready` -> `stale` after 30 days without retraining.
-* **Automatic shut-off** needs: leak/burst, confidence >= 0.85, severity >= 0.9, 6 h at "ticket",
+* **Automatic shut-off** needs the per-flat commissioning gate (`flats.auto_shutoff_validated`,
+  default FALSE for every flat including existing ones; an admin sets it with
+  `PUT /flats/{id}/auto-shutoff-validation {validated, note}`, audited, revocable). Without it the
+  alert stays at `ticket` and the audit says `shutoff_not_commissioned` ("auto shut-off not
+  commissioned for this flat"); manual closes are unaffected. It also needs: leak/burst, confidence >= 0.85, severity >= 0.9, 6 h at "ticket",
   baseline not learning, recent data and no active water use (any 15-min slice of the last
   `ACTIVE_USE_WINDOW_MIN` = 60 min with regularly stopping flow). Then:
   1. `shutoff_warned_at` set, audit + WS `shutoff_warning` (staff / resident can cancel by

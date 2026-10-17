@@ -48,13 +48,14 @@ class LeaderLock:
         except Exception:
             log.exception("leader_acquire_failed")
             if conn is not None:
-                await conn.close()
+                self._conn = conn  # may hold the lock if the failure came after acquiring it
+                await self._drop()
             return False
         if got:
             self._conn = conn
             log.info("maintenance_leader_acquired")
             return True
-        await conn.close()
+        await conn.close()  # lock not held on this connection: safe to pool
         return False
 
     async def release(self) -> None:
@@ -67,8 +68,15 @@ class LeaderLock:
         await self._drop()
 
     async def _drop(self) -> None:
+        """Really close the lock connection. A plain ``close()`` would hand it back to the pool
+        with the session-level advisory lock STILL HELD (pool reset only rolls back), so the
+        lock could outlive our leadership; ``invalidate()`` discards the DBAPI connection."""
         conn, self._conn = self._conn, None
         if conn is not None:
+            try:
+                await conn.invalidate()
+            except Exception:
+                log.debug("leader_connection_invalidate_failed")
             try:
                 await conn.close()
             except Exception:
