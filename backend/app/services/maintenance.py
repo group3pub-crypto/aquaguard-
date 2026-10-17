@@ -17,10 +17,9 @@ from app.models import Baseline, Flat, FlowReading
 from app.repositories import FlatRepository, SensorHealthRepository
 from app.runtime import Runtime
 from app.services import alert_engine, baseline, valve_control
+from app.services.ingest import LATE_AFTER, OFFLINE_AFTER
 
 log = structlog.get_logger(__name__)
-LATE_AFTER = timedelta(minutes=2)
-OFFLINE_AFTER = timedelta(minutes=5)
 MIN_READINGS_FOR_BASELINE = 60
 RETRAIN_MAX_AGE = timedelta(hours=24)
 

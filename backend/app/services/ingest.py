@@ -28,7 +28,6 @@ from app.services.batcher import ReadingBatcher
 log = structlog.get_logger(__name__)
 LATE_AFTER = timedelta(minutes=2)
 OFFLINE_AFTER = timedelta(minutes=5)
-EXPECTED_INTERVAL_S = 60.0
 M = TypeVar("M", bound=BaseModel)
 
 

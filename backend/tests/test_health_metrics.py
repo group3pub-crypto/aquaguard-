@@ -263,15 +263,7 @@ def test_no_demo_functionality_remains_in_the_backend():
     files = [
         BACKEND / n for n in ("Dockerfile", "docker-entrypoint.sh", "README.md", "pyproject.toml")
     ]
-    # app/mqtt/ and ingest.py belong to the ingest owner (leftover wording is reported to them)
-    for path in [
-        *(
-            p
-            for p in BACKEND.glob("app/**/*.py")
-            if "mqtt" not in p.parts and p.name != "ingest.py"
-        ),
-        *files,
-    ]:
+    for path in [*BACKEND.glob("app/**/*.py"), *files]:
         for n, line in enumerate(path.read_text().splitlines(), 1):
             if banned.search(line):
                 offenders.append(f"{path.relative_to(BACKEND)}:{n}: {line.strip()[:80]}")
@@ -289,5 +281,13 @@ def test_dev_bootstrap_script_uses_the_cli_and_never_puts_a_password_in_argv():
     assert (BACKEND / "scripts/dev_bootstrap.sh").stat().st_mode & 0o111
 
 
-def test_migration_0003_is_head_and_chains_from_0001():
-    assert head_revision() == "0003"
+def test_migration_chain_is_linear_and_head_is_latest():
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config(str(BACKEND / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND / "alembic"))
+    script = ScriptDirectory.from_config(cfg)
+    revs = [r.revision for r in script.walk_revisions()]
+    assert len(script.get_heads()) == 1 and revs[0] == head_revision()
+    assert revs[-1] == "0001" and revs[::-1] == sorted(revs)

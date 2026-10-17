@@ -9,7 +9,7 @@ from app.repositories import (
     ReadingRepository,
     SensorHealthRepository,
 )
-from app.services import ingest
+from app.services import ingest, maintenance
 from tests.helpers import TOPIC, flow_msg
 
 HB_TOPIC = "aquaguard/green-valley/101/heartbeat"
@@ -167,7 +167,7 @@ async def test_refresh_sensor_health_marks_offline_and_broadcasts(rt, db, world)
         await SensorHealthRepository(s).upsert(
             fid, last_seen=datetime.now(UTC) - timedelta(minutes=10), status="online"
         )
-    assert await ingest.refresh_sensor_health(rt, datetime.now(UTC)) == 1
+    assert await maintenance.refresh_sensor_health(rt, datetime.now(UTC)) == 1
     async with db.session() as s:
         h = await SensorHealthRepository(s).get_for_flat(fid)
     assert h.status == "offline" and h.missed_readings >= 9

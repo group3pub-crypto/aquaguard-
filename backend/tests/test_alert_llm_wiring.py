@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from app.models import Alert
 from app.services import llm
 from app.services.llm import ExplainResult
-from tests.conftest import T0, make_alert
+from tests.conftest import make_alert
 
 
 class FakeExplainer:

@@ -15,8 +15,8 @@ Auto shut-off protocol (tier 3 "ticket" -> tier 4 "auto_shutoff"):
 from __future__ import annotations
 
 import uuid
-from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import structlog
