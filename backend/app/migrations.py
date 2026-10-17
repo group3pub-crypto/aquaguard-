@@ -8,6 +8,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Database
 
@@ -25,6 +26,13 @@ async def current_revision(db: Database) -> str | None:
     try:
         async with db.engine.connect() as conn:
             return (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+    except Exception:
+        return None
+
+
+async def revision_from_session(session: AsyncSession) -> str | None:
+    try:
+        return (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar()
     except Exception:
         return None
 

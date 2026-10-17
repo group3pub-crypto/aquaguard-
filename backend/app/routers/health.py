@@ -7,10 +7,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from sqlalchemy import text
 
 from app import metrics
-from app.dependencies import RT, AdminUser, PublicRoute, metrics_policy
-from app.migrations import current_revision, head_revision
+from app.dependencies import RT, AdminUser, PublicRoute, Session, metrics_policy
+from app.migrations import current_revision, head_revision, revision_from_session
 
 router = APIRouter(tags=["health"])
 
@@ -19,6 +20,14 @@ def _mqtt_state(rt) -> str:
     if not rt.settings.mqtt_enabled:
         return "disabled"
     return "connected" if rt.publisher.connected else "disconnected"
+
+
+async def _session_ok(session) -> bool:
+    try:
+        await session.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 def _mqtt_ok(rt) -> bool:
@@ -46,15 +55,17 @@ async def ready(rt: RT, response: Response):
 
 
 @router.get("/health/details")
-async def details(rt: RT, admin: AdminUser):
-    db_ok = await rt.db.ping()
+async def details(rt: RT, admin: AdminUser, session: Session):
+    # use the request session: a second connection could not coexist with it on SQLite
+    revision = await revision_from_session(session)
+    db_ok = revision is not None or await _session_ok(session)
     return {
         "status": "ok" if db_ok else "degraded",
         "version": rt.settings.app_version,
         "uptime_s": round(time.time() - rt.started_at),
         "db": "ok" if db_ok else "down",
         "migration": {
-            "current": await current_revision(rt.db) if db_ok else None,
+            "current": revision,
             "head": head_revision(),
         },
         "mqtt": _mqtt_state(rt),

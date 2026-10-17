@@ -85,6 +85,8 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
         await self.session.execute(
             update(SensorHealth)
             .where(SensorHealth.last_seen.is_not(None), SensorHealth.status != "online")
-            .values(missed_readings=func.cast(func.floor(age_s / EXPECTED_INTERVAL_S), Integer))
+            .values(
+                missed_readings=func.cast(func.floor(age_s / EXPECTED_INTERVAL_S + 1e-6), Integer)
+            )
         )
         return changed

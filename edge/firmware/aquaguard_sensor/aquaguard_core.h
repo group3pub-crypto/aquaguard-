@@ -54,7 +54,7 @@ struct Config {
   // --- reporting
   uint32_t flow_period_s = 60;
   uint32_t heartbeat_period_s = 300;
-  uint32_t max_backfill_s = 600;  // backend drops readings older than ~this (docs/hardware)
+  uint32_t max_backfill_s = 540;  // backend reportedly drops readings older than ~600 s; keep margin
   uint32_t time_valid_min_epoch = 1735689600u;  // 2025-01-01: anything below = SNTP not synced
 
   // --- cumulative volume persistence (wear aware)
@@ -104,7 +104,8 @@ bool timeValid(uint32_t epoch, const Config &c);
 int localHour(uint32_t epoch, int32_t tz_offset_s);
 bool inNightWindow(int hour, uint8_t start_h, uint8_t end_h);
 uint32_t fnv1a32(const char *s);
-float relayLevelIsHigh(bool energized, bool active_low);  // 1.0 / 0.0 (kept float-free of Arduino)
+// Pin level for a relay: energized XOR active_low. true = drive HIGH.
+bool relayPinHigh(bool energized, bool active_low);
 
 // ------------------------------------------------------------------ persistent store
 class KvStore {
@@ -125,11 +126,14 @@ class MemStore : public KvStore {
 };
 
 // ------------------------------------------------------------------ pulse debounce (ISR safe)
+#ifndef AQG_ISR_INLINE
+#define AQG_ISR_INLINE inline __attribute__((always_inline))  // keep ISR code out of flash-cached text
+#endif
 struct PulseDebouncer {
   uint32_t last_us = 0;
   bool have_last = false;
   // Returns true when this edge is accepted as a pulse. Wrap-safe (uint32 micros()).
-  inline bool onEdge(uint32_t now_us, uint32_t min_gap_us) {
+  AQG_ISR_INLINE bool onEdge(uint32_t now_us, uint32_t min_gap_us) {
     if (have_last && (uint32_t)(now_us - last_us) < min_gap_us) return false;
     last_us = now_us;
     have_last = true;
@@ -214,15 +218,15 @@ class SensorFaults {
  private:
   Config cfg_;
   bool have_level_ = false, last_level_ = false, impossible_now_ = false;
-  uint32_t last_change_s_ = 0;
+  uint32_t last_change_s_ = 0, mono_ = 0;
   uint8_t over_ = 0;
 };
 
 class BatteryMonitor {
  public:
   void begin(const Config &c) { cfg_ = c; }
-  // vbat_mv < 0 => no reading. Divider/attenuation already applied by caller? NO: pass the ADC pin
-  // millivolts; the divider ratio is applied here.
+  // adc_mv = millivolts AT THE ADC PIN (analogReadMilliVolts); the divider ratio is applied here.
+  // adc_mv < 0 => no new sample (state kept).
   void update(int adc_mv);
   bool valid() const { return valid_; }
   float vbat() const { return vbat_; }
@@ -253,7 +257,7 @@ class MessageIdGenerator {
   bool freshStart() const { return fresh_; }
  private:
   KvStore *store_ = nullptr;
-  uint32_t counter_ = 0, reserved_ = 0, reserve_ = 4096;
+  uint32_t counter_ = 0, reserved_ = 0, reserve_ = 4096, left_ = 0;
   bool failed_ = false, fresh_ = false;
 };
 
@@ -343,7 +347,8 @@ class ValveController {
   Config cfg_;
   ValveState state_ = VALVE_OPEN;
   CloseConfirm confirm_ = CC_NONE;
-  uint32_t close_s_ = 0, energized_s_ = 0, closed_flow_s_ = 0;
+  uint32_t close_s_ = 0, energized_s_ = 0, closed_flow_s_ = 0, calm_s_ = 0, now_s_ = 0;
+  float last_lpm_ = 0;
   bool saw_flow_ = false, store_failed_ = false;
   char ring_[16][17] = {};
   uint8_t ring_n_ = 0, ring_i_ = 0;
@@ -387,8 +392,6 @@ class Node {
   // Next reading to transmit (oldest first, stale dropped, timestamps resolved) or nullptr.
   const Reading *nextToSend(uint32_t mono_s, uint32_t epoch);
   void sent(uint32_t id) { ring_.popOldestIfId(id); }
-  bool localCloseWanted() const { return local_close_; }
-  void localCloseDone() { local_close_ = false; }
   void flushPersist(uint32_t mono_s) { vol_.flush(flow_.totalPulses(), mono_s); }
 
   ValveController &valve() { return valve_; }
@@ -410,13 +413,11 @@ class Node {
   ValveController valve_;
   ReadingRing ring_;
   KvStore *store_ = nullptr;
-  bool time_ok_ = false, local_close_ = false;
+  bool time_ok_ = false;
   uint32_t epoch_now_ = 0, last_reading_s_ = 0, last_beat_s_ = 0;
   uint32_t last_tick_s_ = 0;
   ErrMask period_err_ = 0, boot_err_ = 0;
   int rssi_ = 1000;
-  bool backfill_flag_ = false;
-  uint32_t local_ok_run_ = 0;
 };
 
 // ------------------------------------------------------------------ JSON (no dynamic memory)
