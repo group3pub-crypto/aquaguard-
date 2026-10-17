@@ -43,9 +43,9 @@ describe('backoffDelay', () => {
 });
 
 describe('useWebSocket', () => {
-  it('on close code 4401 does NOT retry with the stale ticket and signals unauthorized', async () => {
+  it('on close code 4401 without a refresher does NOT retry with the stale ticket and signals unauthorized', async () => {
     const onUnauthorized = vi.fn();
-    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: vi.fn(), onUnauthorized }));
+    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn(), onUnauthorized }));
     await flush();
     act(() => MockWS.instances[0]?.fail(4401));
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
@@ -58,7 +58,7 @@ describe('useWebSocket', () => {
 
   it('still retries on ordinary closes (1006)', async () => {
     const onUnauthorized = vi.fn();
-    renderHook(() => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: vi.fn(), onUnauthorized }));
+    renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn(), onUnauthorized }));
     await flush();
     act(() => MockWS.instances[0]?.fail(1006));
     await act(async () => {
@@ -69,7 +69,7 @@ describe('useWebSocket', () => {
   });
 
   it('reconnects on the backoff schedule then reports disconnected', async () => {
-    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: vi.fn(), maxRetries: 3 }));
+    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn(), maxRetries: 3 }));
     await flush();
     expect(MockWS.instances).toHaveLength(1);
     const expected = [1000, 2000, 4000];
@@ -95,7 +95,7 @@ describe('useWebSocket', () => {
   });
 
   it('resets the backoff after a successful open', async () => {
-    renderHook(() => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: vi.fn() }));
+    renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn() }));
     await flush();
     act(() => MockWS.instances[0]?.fail());
     await act(async () => {
@@ -110,7 +110,7 @@ describe('useWebSocket', () => {
   });
 
   it('cleans up the socket and pending timers on unmount', async () => {
-    const { unmount } = renderHook(() => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: vi.fn() }));
+    const { unmount } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn() }));
     await flush();
     act(() => MockWS.instances[0]?.fail());
     unmount();
@@ -119,7 +119,7 @@ describe('useWebSocket', () => {
     });
     expect(MockWS.instances).toHaveLength(1);
 
-    const second = renderHook(() => useWebSocket({ getUrl: () => Promise.resolve('ws://y'), enabled: true, onMessage: vi.fn() }));
+    const second = renderHook(() => useWebSocket({ getUrl: () => Promise.resolve('ws://y'), onMessage: vi.fn() }));
     await flush();
     const sock = MockWS.instances[1];
     second.unmount();
@@ -129,7 +129,7 @@ describe('useWebSocket', () => {
   it('does not reconnect when only the handler identity changes', async () => {
     const first = vi.fn();
     const second = vi.fn();
-    const { rerender } = renderHook(({ h }) => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: h }), { initialProps: { h: first } });
+    const { rerender } = renderHook(({ h }) => useWebSocket({ getUrl: fixedUrl, onMessage: h }), { initialProps: { h: first } });
     await flush();
     rerender({ h: second });
     rerender({ h: vi.fn() });
@@ -141,7 +141,7 @@ describe('useWebSocket', () => {
   it('delivers messages to the latest handler', async () => {
     const first = vi.fn();
     const latest = vi.fn();
-    const { rerender } = renderHook(({ h }) => useWebSocket({ getUrl: fixedUrl, enabled: true, onMessage: h }), { initialProps: { h: first } });
+    const { rerender } = renderHook(({ h }) => useWebSocket({ getUrl: fixedUrl, onMessage: h }), { initialProps: { h: first } });
     await flush();
     rerender({ h: latest });
     act(() => MockWS.instances[0]?.onmessage?.({ data: 'hello' } as MessageEvent));
@@ -150,9 +150,109 @@ describe('useWebSocket', () => {
   });
 
   it('stays idle when not enabled (no auth yet)', async () => {
-    const { result } = renderHook(() => useWebSocket({ getUrl: () => Promise.resolve(null), enabled: false, onMessage: vi.fn() }));
+    const { result } = renderHook(() => useWebSocket({ getUrl: null, onMessage: vi.fn() }));
     await flush();
     expect(result.current.state).toBe('idle');
     expect(MockWS.instances).toHaveLength(0);
+  });
+
+  it('fetches a FRESH ticket for every connect and reconnect', async () => {
+    let n = 0;
+    const getUrl = vi.fn(() => Promise.resolve(`ws://x?ticket=t${++n}`));
+    renderHook(() => useWebSocket({ getUrl, onMessage: vi.fn() }));
+    await flush();
+    act(() => MockWS.instances[0]?.fail(1006));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(getUrl).toHaveBeenCalledTimes(2);
+    expect(MockWS.instances.map((w) => w.url)).toEqual(['ws://x?ticket=t1', 'ws://x?ticket=t2']);
+  });
+
+  it('retries with backoff when the ticket request fails', async () => {
+    const getUrl = vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValue('ws://x');
+    const { result } = renderHook(() => useWebSocket({ getUrl, onMessage: vi.fn() }));
+    await flush();
+    expect(result.current.state).toBe('reconnecting');
+    expect(MockWS.instances).toHaveLength(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it('4401: refreshes the token and reconnects ONCE; a second 4401 logs out', async () => {
+    const onAuthExpired = vi.fn().mockResolvedValue(true);
+    const onUnauthorized = vi.fn();
+    renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn(), onAuthExpired, onUnauthorized }));
+    await flush();
+    act(() => MockWS.instances[0]?.fail(4401));
+    await flush();
+    await flush();
+    expect(onAuthExpired).toHaveBeenCalledTimes(1);
+    expect(MockWS.instances).toHaveLength(2);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    act(() => MockWS.instances[1]?.fail(4401));
+    await flush();
+    expect(onAuthExpired).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(MockWS.instances).toHaveLength(2);
+  });
+
+  it('4401: failed refresh means logout, no reconnect', async () => {
+    const onAuthExpired = vi.fn().mockResolvedValue(false);
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn(), onAuthExpired, onUnauthorized }));
+    await flush();
+    act(() => MockWS.instances[0]?.fail(4401));
+    await flush();
+    await flush();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toBe('disconnected');
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it('4403: shows a reason and never retries', async () => {
+    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn() }));
+    await flush();
+    act(() => MockWS.instances[0]?.fail(4403));
+    expect(result.current.state).toBe('disconnected');
+    expect(result.current.notice).toMatchObject({ code: 4403 });
+    expect(result.current.notice?.message).toMatch(/administrator/i);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300_000);
+    });
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it.each([4429, 4408])('%i: shows a reason and retries politely with backoff', async (code) => {
+    const { result } = renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage: vi.fn() }));
+    await flush();
+    act(() => MockWS.instances[0]?.fail(code));
+    expect(result.current.state).toBe('reconnecting');
+    expect(result.current.notice?.code).toBe(code);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000); // polite: > the 1s first-attempt delay
+    });
+    expect(MockWS.instances).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(MockWS.instances).toHaveLength(2);
+  });
+
+  it('answers a server {"type":"ping"} with a text frame and does not forward it', async () => {
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage }));
+    await flush();
+    const ws = MockWS.instances[0]!;
+    const send = vi.fn();
+    (ws as unknown as { send: typeof send }).send = send;
+    act(() => ws.onmessage?.({ data: '{"type":"ping"}' } as MessageEvent));
+    expect(send).toHaveBeenCalledWith('ping');
+    expect(onMessage).not.toHaveBeenCalled();
   });
 });

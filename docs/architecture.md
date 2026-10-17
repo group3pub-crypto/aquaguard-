@@ -31,4 +31,4 @@ flowchart TB
 `watch -> alert -> ticket -> critical`. Escalation needs sustained anomalous evidence; maintenance/admin may acknowledge, snooze or resolve at each stage; resolved alerts return to normal. Exact thresholds live in the backend code and are not duplicated here.
 
 ## Deployment
-Single-node Docker Compose (see `docker-compose.yml`). Profiles: `demo` (simulator), `bot` (Telegram). Dev overrides in `docker-compose.override.yml`.
+Single-node Docker Compose: `docker-compose.yml` (base) + `docker-compose.prod.yml` (TLS proxy, published ports; `make up`) or `docker-compose.dev.yml` (`make dev-up`, includes the simulator profile `sim`, a development/test tool). Profiles: `bot` (Telegram), `backup`. Optional overlays: `.timescale.yml`, `.monitoring.yml`. See `docs/deployment.md`.

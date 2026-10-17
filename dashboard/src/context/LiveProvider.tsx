@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from 'react
 import type { ReactNode } from 'react';
 import { parseWsMessage } from '@/lib/guards';
 import { refreshSession } from '@/lib/api';
+import { isUnbound } from '@/lib/permissions';
 import { buildWsUrl } from '@/lib/wsAuth';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type {
@@ -68,7 +69,7 @@ export function useLive(): LiveValue {
 let eventSeq = 0;
 
 export function LiveProvider({ children }: { children: ReactNode }) {
-  const { status: authStatus, expireSession } = useAuth();
+  const { status: authStatus, user, expireSession } = useAuth();
   const [readings, setReadings] = useState<Record<string, LiveReading[]>>({});
   const [valves, setValves] = useState<Record<string, ValveState>>({});
   const [valveCommands, setValveCommands] = useState<Record<string, ValveCommandRecord>>({});
@@ -131,7 +132,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   );
 
   const { state, notice, reconnect } = useWebSocket({
-    getUrl: authStatus === 'authenticated' ? buildWsUrl : null,
+    // Unbound accounts have no data scope (the server would close with 4403): don't connect.
+    getUrl: authStatus === 'authenticated' && !isUnbound(user) ? buildWsUrl : null,
     onMessage,
     onAuthExpired: refreshSession,
     onUnauthorized: expireSession,

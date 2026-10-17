@@ -44,9 +44,10 @@ const send = (obj: unknown) => act(() => MockWS.instances[0]?.onmessage?.({ data
 const flush = () => act(() => Promise.resolve());
 
 describe('LiveProvider', () => {
-  it('builds the WS url in one place, a single-use ticket as query param', async () => {
-    await expect(buildWsUrl(true)).resolves.toContain('/api/v1/ws/live?ticket=tkt-123');
-    await expect(buildWsUrl(false)).resolves.toBeNull();
+  it('builds the WS url in one place from a POST /auth/ws-ticket ticket, never a JWT', async () => {
+    const url = await buildWsUrl();
+    expect(url).toContain('/api/v1/ws/live?ticket=tkt-123');
+    expect(url).not.toContain('token=');
   });
 
   it('handles every real frame type and ignores unknown ones', async () => {

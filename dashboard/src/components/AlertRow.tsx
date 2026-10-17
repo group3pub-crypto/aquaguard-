@@ -3,11 +3,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { canTransition } from '@/lib/alertActions';
-import { alertStateLabel, alertStateTone, describeSource, fmtNumber, fmtTime, isOpenAlert } from '@/lib/format';
+import { alertStateLabel, alertStateTone, describeSource, fmtNumber, fmtTime, isOpenAlert, safeAlertMessage } from '@/lib/format';
+import { shutoffPhase } from '@/lib/shutoff';
 import { useAuth } from '@/context/AuthProvider';
 import { useAction } from '@/hooks/useAction';
 import type { Alert } from '@/lib/types';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ShutoffWarning } from './ShutoffWarning';
 import { StatusBadge } from './StatusBadge';
 
 const SNOOZE_OPTIONS = [15, 30, 60, 120] as const;
@@ -28,6 +30,7 @@ export function AlertRow({
   const who = user?.username ?? '';
   const state = String(alert.state);
   const open = isOpenAlert(alert);
+  const warned = shutoffPhase(alert, Date.now(), 0) !== null; // any warning phase highlights the actions
 
   const act = async (fn: () => Promise<unknown>) => {
     if (!user) return false;
@@ -50,13 +53,18 @@ export function AlertRow({
           {fmtTime(alert.created_at)}
         </time>
       </div>
-      <p className="mt-3">{alert.message ?? 'No message provided.'}</p>
+      <p className="mt-3">{safeAlertMessage(alert)}</p>
       <p className="mt-1 text-xs text-ink-2">
-        Severity {fmtNumber(alert.severity_score, 2)} · Message: {describeSource(alert.message_source)}
+        Severity {fmtNumber(alert.severity_score, 2)} · {describeSource(alert.message_source)}
       </p>
 
+      <ShutoffWarning alert={alert} canAct={can.acknowledge || can.override} />
       {open ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Alert actions">
+        <div
+          className={`mt-4 flex flex-wrap items-center gap-2 ${warned ? 'rounded-md ring-2 ring-error ring-offset-2' : ''}`}
+          role="group"
+          aria-label="Alert actions"
+        >
           {can.acknowledge && canTransition('acknowledge', state) ? (
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act(() => api.acknowledge(alert.id, { acknowledged_by: who }))}>
               Acknowledge

@@ -16,7 +16,7 @@ device cannot read other flats or send valve commands (`valve/cmd` is read-only 
    It prints a secret **once** (not stored), the `mosquitto_passwd` command and the ACL block.
    (Check `python -m app.cli provision-sensor --help` for the exact flags; this repo's firmware work
    did not run it against a database.)
-   Alternative used by the demo stack: `MQTT_DEVICES` + `MQTT_DEVICE_SECRET` in `infra/mosquitto`,
+   Alternative used by the compose stack (`make provision-sensor`): `MQTT_DEVICES` + `MQTT_DEVICE_SECRET` in `infra/mosquitto`,
    password from `sh infra/mosquitto/device_password.sh <slug>/<unit>`.
 3. Put the values in `edge/firmware/aquaguard_sensor/config.h` (git-ignored; copy from
    `config.h.example`): `MQTT_USER`, `MQTT_PASSWORD`, `SOCIETY_SLUG`, `FLAT_UNIT`, `MQTT_CA_CERT_PEM`.

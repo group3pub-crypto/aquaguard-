@@ -282,8 +282,6 @@ export const api = {
   register: (body: RegisterRequest) =>
     request<User>('/auth/register', { method: 'POST', body, auth: false }),
   me: (o: Sig = {}) => request<User>('/auth/me', o),
-  wsTicket: (o: Sig = {}) =>
-    request<{ ticket: string; expires_in: number }>('/auth/ws-ticket', { ...o, method: 'POST' }),
 
   societies: (o: Sig = {}) => request<Society[]>('/societies', o),
   societyStats: (id: Id, o: Sig = {}) => request<SocietyStats>(`/societies/${enc(id)}/stats`, o),

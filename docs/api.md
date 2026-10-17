@@ -17,7 +17,6 @@ Roles: resident < maintenance < admin. Reads are open to any authenticated user.
 | POST `/tools/{active-alerts,flat-usage,top-losses,weekly-report}` | Bot/orchestrator tool endpoints | any authenticated |
 | GET `/societies`, `/flats?society_id=` | Lookups | any authenticated |
 | POST `/alerts/{id}/override` | Manual state override | admin |
-| POST `/demo/*` | Demo controls (only when `DEMO_MODE=true`) | admin |
 | PUT `/auth/users/{id}/role` | Change role | admin |
 | POST `/ml/retrain` | Retrain models | admin |
 | POST `/forecast/generate` | Generate forecast | admin |
