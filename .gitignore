@@ -39,3 +39,6 @@ bot/.state/
 .DS_Store
 .idea/
 .vscode/
+
+# local dev TLS material (infra/scripts/gen-dev-certs.sh)
+.dev-certs/

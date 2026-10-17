@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 
@@ -12,6 +13,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 log = structlog.get_logger("access")
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
@@ -31,7 +33,9 @@ def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
 
 class RequestLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        rid = request.headers.get("x-request-id", "")[:64] or uuid.uuid4().hex
+        supplied = request.headers.get("x-request-id", "")
+        # client ids are only trusted when harmless (log injection): else a fresh one
+        rid = supplied if REQUEST_ID_RE.match(supplied) else uuid.uuid4().hex
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=rid)
         start = time.perf_counter()

@@ -8,8 +8,15 @@
 #                                         of device "<slug>/<unit>" is the first 32 hex chars of
 #                                         sha256("<secret>:<slug>/<unit>") (see device_password.sh)
 #   MQTT_CONTROL_USERNAME / _PASSWORD     optional simulator control client (read aquaguard/control/#)
+#   MQTT_LISTEN_ADDR (127.0.0.1) MQTT_LISTEN_PORT (1883)   plain-text listener for the backend only;
+#                                         set MQTT_LISTEN_ADDR=0.0.0.0 inside a container whose
+#                                         network is private (compose) - never publish it
+#   MQTT_TLS_CERT_FILE / MQTT_TLS_KEY_FILE  enable the TLS listener for devices (TLS >= 1.2,
+#                                         username/password + ACL, no client certificate required);
+#                                         MQTT_TLS_CA_FILE (optional chain), MQTT_TLS_PORT (8883),
+#                                         MQTT_TLS_ADDR (0.0.0.0)
 #   MQTT_RUNTIME_DIR (/tmp/mosquitto)  MOSQUITTO_CONFIG_DIR (dir of this script)
-#   MQTT_DATA_DIR (/mosquitto/data)  MQTT_LISTEN_ADDR (0.0.0.0)  MQTT_LISTEN_PORT (1883)
+#   MQTT_DATA_DIR (/mosquitto/data)
 #   MOSQUITTO_BIN (mosquitto)  MQTT_RENDER_ONLY=1 (render files, do not start the broker)
 set -eu
 umask 077
@@ -77,10 +84,35 @@ mosquitto_passwd -U "$RUN_DIR/passwd" >/dev/null
 
 DATA_DIR="${MQTT_DATA_DIR:-/mosquitto/data}"
 mkdir -p "$DATA_DIR" 2>/dev/null || true
+LISTENERS="listener ${MQTT_LISTEN_PORT:-1883} ${MQTT_LISTEN_ADDR:-127.0.0.1}
+protocol mqtt"
+TLS=no
+if [ -n "${MQTT_TLS_CERT_FILE:-}${MQTT_TLS_KEY_FILE:-}" ]; then
+  [ -r "${MQTT_TLS_CERT_FILE:-}" ] || die "cannot read MQTT_TLS_CERT_FILE"
+  [ -r "${MQTT_TLS_KEY_FILE:-}" ] || die "cannot read MQTT_TLS_KEY_FILE"
+  CAFILE=""
+  if [ -n "${MQTT_TLS_CA_FILE:-}" ]; then
+    [ -r "$MQTT_TLS_CA_FILE" ] || die "cannot read MQTT_TLS_CA_FILE"
+    CAFILE="cafile $MQTT_TLS_CA_FILE"
+  fi
+  # TLS >= 1.2 only: tls_version pins a single version, so list the allowed modern ciphers
+  # and disable the legacy protocol versions via the OpenSSL min protocol (see README).
+  LISTENERS="$LISTENERS
+
+listener ${MQTT_TLS_PORT:-8883} ${MQTT_TLS_ADDR:-0.0.0.0}
+protocol mqtt
+certfile $MQTT_TLS_CERT_FILE
+keyfile $MQTT_TLS_KEY_FILE
+$CAFILE
+require_certificate false
+tls_version tlsv1.2
+ciphers_tls1.3 TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256"
+  TLS=yes
+fi
 sed -e "s|__RUNTIME_DIR__|$RUN_DIR|g" -e "s|__DATA_DIR__|${DATA_DIR%/}|g" \
-    -e "s|__LISTEN_ADDR__|${MQTT_LISTEN_ADDR:-0.0.0.0}|g" \
-    -e "s|__LISTEN_PORT__|${MQTT_LISTEN_PORT:-1883}|g" \
-    "$CONF_DIR/mosquitto.conf.template" > "$RUN_DIR/mosquitto.conf"
+    "$CONF_DIR/mosquitto.conf.template" \
+  | awk -v block="$LISTENERS" '$0=="__LISTENERS__"{print block; next} {print}' \
+  > "$RUN_DIR/mosquitto.conf"
 
 # mosquitto drops privileges to the "mosquitto" user when started as root
 if [ "$(id -u)" = 0 ] && id mosquitto >/dev/null 2>&1; then
@@ -89,6 +121,6 @@ if [ "$(id -u)" = 0 ] && id mosquitto >/dev/null 2>&1; then
 fi
 chmod 0700 "$RUN_DIR"; chmod 0600 "$RUN_DIR/passwd" "$ACL"
 
-echo "mosquitto entrypoint: rendered $RUN_DIR (devices=$n control=$([ -n "$CONTROL" ] && echo yes || echo no))" >&2
+echo "mosquitto entrypoint: rendered $RUN_DIR (devices=$n tls=$TLS control=$([ -n "$CONTROL" ] && echo yes || echo no))" >&2
 [ "${MQTT_RENDER_ONLY:-0}" = 1 ] && exit 0
 exec "${MOSQUITTO_BIN:-mosquitto}" -c "$RUN_DIR/mosquitto.conf"
