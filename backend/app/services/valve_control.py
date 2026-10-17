@@ -25,6 +25,11 @@ ACK_TIMEOUT = timedelta(seconds=60)  # default; the runtime value is VALVE_ACK_T
 EXPECTED_STATE = {"close": "closed", "open": "open"}
 
 
+class AutoShutoffNotCommissioned(Exception):
+    def __init__(self, flat_id) -> None:
+        super().__init__(f"auto shut-off not commissioned for flat {flat_id}")
+
+
 def _broadcast_payload(cmd: ValveCommand) -> dict[str, Any]:
     return {
         "type": "valve",
@@ -49,6 +54,10 @@ async def send_valve_command(
     """Issue a valve command. NOTE: commits `session` (twice) as part of the outbox protocol;
     callers must not hold other uncommitted work they would not want persisted."""
     now = now or utcnow()
+    if source == "auto" and command == "close" and not flat.auto_shutoff_validated:
+        # defence in depth: the alert engine checks this too, but no code path may close a
+        # valve automatically in a flat that was never commissioned for it
+        raise AutoShutoffNotCommissioned(flat.id)
     repo, audit = ValveRepository(session), AuditRepository(session)
     cmd = await repo.create(
         flat_id=flat.id,

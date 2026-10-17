@@ -22,7 +22,7 @@ from app.repositories import (
 from app.runtime import Runtime
 from app.schemas.domain import ReadingOut
 from app.schemas.mqtt import MAX_PAYLOAD_BYTES, FlowPayload, HeartbeatPayload, ValveAckPayload
-from app.services import alert_engine, detector, valve_control
+from app.services import alert_engine, detector, device_status, valve_control
 from app.services.batcher import ReadingBatcher
 
 log = structlog.get_logger(__name__)
@@ -188,6 +188,19 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
         raise
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
+    if any(v is not None for v in (data.tot, data.vbat, data.valve, data.fw, data.err, data.bat)):
+        await device_status.apply_report(
+            rt,
+            flat_id,
+            society_id,
+            min(ts, now),
+            fw=data.fw,
+            bat=data.bat,
+            vbat=data.vbat,
+            tot=data.tot,
+            valve=data.valve,
+            err=list(data.err or []),
+        )
     out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
     await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
     # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
@@ -197,11 +210,22 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
 
 
 async def handle_heartbeat(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
-    _parse(HeartbeatPayload, payload)
+    data = _parse(HeartbeatPayload, payload)
+    now = datetime.now(UTC)
     async with rt.db.session() as session:
         flat = await _resolve_flat(session, parsed)
         await SensorHealthRepository(session).upsert(
-            flat.id, last_seen=datetime.now(UTC), status="online", missed_readings=0
+            flat.id, last_seen=now, status="online", missed_readings=0
+        )
+        flat_id, society_id = flat.id, flat.society_id
+    if data.fw is not None or data.bat is not None:
+        await device_status.apply_report(
+            rt,
+            flat_id,
+            society_id,
+            min(datetime.fromtimestamp(data.ts, UTC), now),
+            fw=data.fw,
+            bat=data.bat,
         )
     rt.counters["heartbeat_ok"] += 1
 

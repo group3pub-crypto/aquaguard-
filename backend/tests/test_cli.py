@@ -2,9 +2,11 @@
 
 import asyncio
 import io
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -16,6 +18,7 @@ from app.models import AuditLog, Flat, FlowReading, User
 from app.services import auth as auth_svc
 from tests.conftest import add_society
 
+REPO = Path(__file__).resolve().parents[2]
 PW = "Cl1AdminPassw0rd"
 
 
@@ -123,19 +126,19 @@ def test_create_admin_validates_username(clidb):
 def test_provision_sensor_prints_credentials_once_with_broker_commands(clidb):
     code, out = run(["provision-sensor", "--society", "green-valley", "--unit", "101"])
     assert code == 0
-    assert "Device username : green-valley.101" in out
+    assert "Device username : green-valley/101" in out
     secret = next(ln for ln in out.splitlines() if ln.startswith("Device secret")).split(": ")[1]
     assert len(secret) >= 40  # token_urlsafe(32)
-    assert f"mosquitto_passwd -b /mosquitto/config/passwd green-valley.101 '{secret}'" in out
+    assert f"mosquitto_passwd -b /mosquitto/config/passwd green-valley/101 '{secret}'" in out
     assert (
-        "user green-valley.101\n"
+        "user green-valley/101\n"
         "topic write aquaguard/green-valley/101/flow\n"
         "topic write aquaguard/green-valley/101/heartbeat\n"
         "topic write aquaguard/green-valley/101/valve/state\n"
         "topic read aquaguard/green-valley/101/valve/cmd\n"
     ) in out
     row = asyncio.run(_flat(clidb, "101"))
-    assert row.sensor_id == "green-valley.101"
+    assert row.sensor_id == "green-valley.101"  # inventory label, not the broker identity
 
 
 async def _flat(url, unit):
@@ -170,7 +173,7 @@ def test_provision_secret_is_random_and_never_persisted(clidb):
     assert (
         all(sec not in blob for sec in secrets_seen) and "sensor_provisioned" not in blob
     ) or True
-    assert "green-valley.102" in blob
+    assert "green-valley/102" in blob
 
 
 def test_provision_sensor_custom_passwd_file_and_errors(clidb, capsys):
@@ -185,10 +188,45 @@ def test_provision_sensor_custom_passwd_file_and_errors(clidb, capsys):
             "/etc/m/pw",
         ]
     )
-    assert "mosquitto_passwd -b /etc/m/pw green-valley.101" in out
+    assert "mosquitto_passwd -b /etc/m/pw green-valley/101" in out
     assert run(["provision-sensor", "--society", "nope", "--unit", "101"])[0] == 1
     assert run(["provision-sensor", "--society", "green-valley", "--unit", "999"])[0] == 1
     assert "unknown" in capsys.readouterr().err
+
+
+def _infra_acl_block(user: str, society: str, unit: str) -> str:
+    """Render infra/mosquitto/acl.device.template exactly like entrypoint.sh (sed)."""
+    tpl = (REPO / "infra/mosquitto/acl.device.template").read_text()
+    out = (
+        tpl.replace("__DEVICE_USER__", user)
+        .replace("__SOCIETY__", society)
+        .replace("__UNIT__", unit)
+    )
+    return "\n".join(ln for ln in out.splitlines() if not ln.startswith("#") and ln.strip())
+
+
+def test_cli_acl_lines_match_the_broker_acl_template_and_the_simulator(clidb):
+    """The printed ACL must be what infra renders for the same device, and the username must be
+    the one the edge simulator and MQTT_DEVICES use (<slug>/<unit>)."""
+    _, out = run(["provision-sensor", "--society", "green-valley", "--unit", "101"])
+    start = out.index("user green-valley/101")
+    printed = out[start:].split("\n\n")[0].strip()
+    assert printed == _infra_acl_block("green-valley/101", "green-valley", "101")
+    src = (REPO / "edge/simulator/simulator.py").read_text()
+    ns: dict = {}
+    fn = re.search(r"^def device_username\(.*?(?=^def |^async def )", src, re.S | re.M)
+    assert fn, "simulator.device_username not found"
+    exec(fn.group(0), ns)  # the simulator's own definition, executed in isolation
+    assert ns["device_username"]("green-valley", "101") == cli.device_username(
+        "green-valley", "101"
+    )
+    # entrypoint.sh splits MQTT_DEVICES entries on the first '/': the CLI name round-trips
+    user = cli.device_username("green-valley", "101")
+    assert user.split("/", 1) == ["green-valley", "101"]
+
+
+def test_provision_rejects_names_the_broker_would_reject(clidb, capsys):
+    assert run(["provision-sensor", "--society", "control", "--unit", "1"])[0] == 1
 
 
 # ------------------------------------------------------------------ retention-run

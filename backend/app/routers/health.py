@@ -11,8 +11,8 @@ from sqlalchemy import text
 
 from app import metrics
 from app.dependencies import RT, AdminUser, PublicRoute, Session, metrics_policy
-from app.services import detector
 from app.migrations import current_revision, head_revision, revision_from_session
+from app.services import detector
 
 router = APIRouter(tags=["health"])
 

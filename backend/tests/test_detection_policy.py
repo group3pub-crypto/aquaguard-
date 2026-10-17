@@ -7,7 +7,7 @@ import pytest
 from app.config import Settings
 from app.services import detector as d
 from tests.conftest import make_settings
-from tests.test_detector import NIGHT_LEAK, feats, fake_store, train_models
+from tests.test_detector import NIGHT_LEAK, fake_store, feats, train_models
 
 NORMAL = feats(mean_flow=0.0, max_flow=0.0, min_flow=0.0)  # rules: nothing happening
 # classes_ order of fake_store: burst, leak, normal, overuse

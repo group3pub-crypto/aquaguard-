@@ -107,3 +107,29 @@ class SensorHealth(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=sa.func.now()
     )
+
+
+class DeviceStatus(Base):
+    """Latest firmware-reported status of a flat's device (one narrow row per flat, so the
+    high-volume ``flow_readings`` table is not scanned for it)."""
+
+    __tablename__ = "device_status"
+    __table_args__ = (
+        sa.CheckConstraint("valve_reported IN ('open', 'closed')", name="valve_reported"),
+    )
+
+    flat_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("flats.id", ondelete="CASCADE"), primary_key=True
+    )
+    firmware_version: Mapped[str | None] = mapped_column(sa.String(50))
+    battery_pct: Mapped[float | None] = mapped_column(sa.Float)
+    battery_volts: Mapped[float | None] = mapped_column(sa.Float)
+    total_volume: Mapped[float | None] = mapped_column(sa.Float)  # lifetime litres (`tot`)
+    valve_reported: Mapped[str | None] = mapped_column(sa.String(10))  # what the device says
+    err_codes: Mapped[list[str]] = mapped_column(
+        JSONType, nullable=False, default=list, server_default=sa.text("'[]'")
+    )
+    reported_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # device ts of the reading
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=sa.func.now()
+    )

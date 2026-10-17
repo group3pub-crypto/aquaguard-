@@ -41,12 +41,49 @@ class FlatOut(ORM):
     sensor_id: str
     valve_state: str
     baseline_status: str
+    auto_shutoff_validated: bool = Field(
+        False, description="Automatic (tier 4) valve closure is commissioned for this flat"
+    )
+    auto_shutoff_validated_at: datetime | None = None
+
+
+class DeviceStatusOut(ORM):
+    """Latest values reported by the device firmware (staff only)."""
+
+    firmware_version: str | None = None
+    battery_pct: float | None = None
+    battery_volts: float | None = None
+    total_volume: float | None = None
+    valve_reported: Literal["open", "closed"] | None = None
+    err_codes: list[str] = Field(default_factory=list)
+    reported_at: datetime | None = None
 
 
 class FlatDetail(FlatOut):
     current_flow: float | None = None
     last_reading_at: datetime | None = None
     sensor_status: SensorStatus
+    # staff only (null for residents)
+    device: DeviceStatusOut | None = None
+    auto_shutoff_validated_by: str | None = None
+    auto_shutoff_notes: str | None = None
+
+
+class DeviceHealth(BaseModel):
+    flat_id: UUID
+    unit_number: str
+    sensor_status: SensorStatus
+    device: DeviceStatusOut | None = None
+
+
+class AutoShutoffValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    validated: bool = Field(True, description="false revokes the commissioning")
+    note: str = Field(
+        min_length=3,
+        max_length=1000,
+        description="What was tested on site (valve, wiring, close/open cycle, who was present)",
+    )
 
 
 class ReadingOut(ORM):
@@ -124,6 +161,7 @@ class AlertOut(ORM):
     resolved_at: datetime | None = None
     shutoff_warned_at: datetime | None = None
     shutoff_gave_up_at: datetime | None = None
+    shutoff_uncommissioned_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

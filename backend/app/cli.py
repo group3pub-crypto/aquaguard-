@@ -66,10 +66,19 @@ async def create_admin(db: Database, settings, username: str, name: str, passwor
         return user.username
 
 
+SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")  # same rule as infra/mosquitto/entrypoint.sh
+
+
+def device_username(slug: str, unit: str) -> str:
+    """Broker username of a device: ``<society-slug>/<unit>`` (what infra/mosquitto's ACL
+    template, MQTT_DEVICES and the edge simulator use). Distinct from the flat's ``sensor_id``."""
+    return f"{slug}/{unit}"
+
+
 def broker_instructions(
     slug: str, unit: str, secret: str, passwd_file: str = DEFAULT_PASSWD_FILE
 ) -> str:
-    user = f"{slug}.{unit}"
+    user = device_username(slug, unit)
     return (
         f"Device username : {user}\n"
         f"Device secret   : {secret}\n"
@@ -96,18 +105,16 @@ async def provision_sensor(
         flat = await FlatRepository(session).get_by_unit(society.id, unit)
         if flat is None:
             raise CliError(f"unknown unit {unit!r} in {slug!r} (create it via POST /api/v1/flats)")
-        username = f"{slug}.{unit}"
-        other = await FlatRepository(session).get_by_sensor_id(username)
-        if other is not None and other.id != flat.id:
-            raise CliError(f"sensor id {username!r} is already used by another flat")
-        flat.sensor_id = username
+        if not (SEGMENT_RE.match(slug) and SEGMENT_RE.match(unit)) or slug == "control":
+            raise CliError("slug and unit must match [A-Za-z0-9_.-]{1,100} (slug != 'control')")
+        username = device_username(slug, unit)
         secret = secrets.token_urlsafe(32)
         await AuditRepository(session).record(
             entity_type="flat",
             entity_id=flat.id,
             action="sensor_provisioned",
             actor="cli",
-            details={"device_user": username},  # never the secret
+            details={"device_user": username},  # never the secret; sensor_id is left untouched
             flat_id=flat.id,
             society_id=society.id,
         )

@@ -51,6 +51,7 @@ class Runtime:
             "stale_reading": 0,
             "detect_run": 0,
             "detect_shed": 0,
+            "device_fault": 0,
         }
     )
     last_detect: dict[UUID, float] = field(default_factory=dict)
@@ -61,6 +62,8 @@ class Runtime:
     is_leader: bool = False  # holds the maintenance advisory lock (always True without PG)
     detect_inflight: int = 0
     batcher: Any = None  # app.services.batcher.ReadingBatcher, created on first reading
+    # flat_id -> (status signature, last_write_monotonic): throttles device_status writes
+    device_cache: dict[UUID, tuple[tuple, float]] = field(default_factory=dict)
     # (slug, unit) -> (tokens, last_refill_monotonic): per-device ingest rate limit
     rate_buckets: dict[tuple[str, str], tuple[float, float]] = field(default_factory=dict)
 

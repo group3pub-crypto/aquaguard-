@@ -12,6 +12,7 @@ from app.dependencies import RT, AdminUser, CallerScope, Session
 from app.repositories import (
     AuditRepository,
     BaselineRepository,
+    DeviceStatusRepository,
     FlatRepository,
     ForecastRepository,
     ReadingRepository,
@@ -21,7 +22,9 @@ from app.repositories import (
 from app.schemas.admin import FlatCreate, FlatUpdate
 from app.schemas.common import Offset
 from app.schemas.domain import (
+    AutoShutoffValidationRequest,
     BaselineOut,
+    DeviceStatusOut,
     FlatDetail,
     FlatOut,
     ForecastOut,
@@ -58,7 +61,8 @@ async def create_flat(body: FlatCreate, admin: AdminUser, session: Session):
         raise HTTPException(404, "Society not found")
     if await flats.get_by_unit(society.id, body.unit_number):
         raise HTTPException(status.HTTP_409_CONFLICT, "Unit already exists in this society")
-    # the sensor id doubles as the MQTT device username: "<society-slug>.<unit>"
+    # the sensor id is an inventory label (default "<slug>.<unit>"); the broker username of the
+    # device is "<slug>/<unit>" (see app.cli.device_username)
     sensor_id = body.sensor_id or f"{society.slug}.{body.unit_number}"
     if await flats.get_by_sensor_id(sensor_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "sensor_id already assigned")
@@ -91,8 +95,13 @@ async def get_flat(flat_id: uuid.UUID, session: Session, scope: CallerScope):
     latest = await ReadingRepository(session).latest(flat.id)
     health = await SensorHealthRepository(session).get_for_flat(flat.id)
     last_seen = health.last_seen if health else None
+    staff = scope.allows_society_stats()
+    dev = await DeviceStatusRepository(session).get_for_flat(flat.id) if staff else None
     return FlatDetail(
         **FlatOut.model_validate(flat).model_dump(),
+        device=DeviceStatusOut.model_validate(dev) if dev else None,
+        auto_shutoff_validated_by=flat.auto_shutoff_validated_by if staff else None,
+        auto_shutoff_notes=flat.auto_shutoff_notes if staff else None,
         current_flow=latest.flow_rate if latest else None,
         last_reading_at=latest.timestamp if latest else None,
         sensor_status=SensorStatus(
@@ -101,6 +110,34 @@ async def get_flat(flat_id: uuid.UUID, session: Session, scope: CallerScope):
             missed_readings=health.missed_readings if health else 0,
         ),
     )
+
+
+@router.put("/{flat_id}/auto-shutoff-validation", response_model=FlatOut)
+async def set_auto_shutoff_validation(
+    flat_id: uuid.UUID, body: AutoShutoffValidationRequest, admin: AdminUser, session: Session
+):
+    """Commission (or revoke) AUTOMATIC valve closure for one flat. Admin only; the note is
+    mandatory and the change is audited. Without this the alert engine never closes the flat's
+    valve on its own (alerts stay at 'ticket'); manual closes are unaffected. Revoking also
+    cancels any running shut-off warning on the flat's alerts (the engine re-checks the gate)."""
+    flat = await FlatRepository(session).get(flat_id)
+    if flat is None:
+        raise HTTPException(404, "Flat not found")
+    previous = flat.auto_shutoff_validated
+    flat.auto_shutoff_validated = body.validated
+    flat.auto_shutoff_validated_at = datetime.now(UTC)
+    flat.auto_shutoff_validated_by = admin.username
+    flat.auto_shutoff_notes = body.note
+    await AuditRepository(session).record(
+        entity_type="flat",
+        entity_id=flat.id,
+        action="auto_shutoff_commissioned" if body.validated else "auto_shutoff_revoked",
+        actor=admin.username,
+        details={"previous": previous, "note": body.note},
+        flat_id=flat.id,
+        society_id=flat.society_id,
+    )
+    return flat
 
 
 @router.patch("/{flat_id}", response_model=FlatOut)

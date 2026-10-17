@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.auth import Role, StrongPassword, Username
 
-# slug and unit end up in MQTT topics and in the device username "<slug>.<unit>": keep them to
-# characters that are safe in both (no '/', '+', '#', no '.' in the unit)
+# slug and unit end up in MQTT topics and in the broker device username "<slug>/<unit>":
+# keep them to characters that are safe in both (no '/', '+', '#', no '.' in the unit)
 SLUG_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 UNIT_RE = r"^[A-Za-z0-9_-]{1,50}$"
 SENSOR_RE = r"^[A-Za-z0-9_.-]{1,100}$"

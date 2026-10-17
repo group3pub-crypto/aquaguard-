@@ -52,6 +52,8 @@ LEARNING_NOTE = (
     "Note: this home's usage baseline is still being learned, so automatic escalation is "
     "limited to the 'alert' level."
 )
+NOT_COMMISSIONED = "auto_shutoff_not_commissioned"
+NOT_COMMISSIONED_NOTICE = "auto shut-off not commissioned for this flat"
 SHUTOFF_TYPES = {"leak", "burst"}
 SHUTOFF_MIN_CONFIDENCE = 0.85
 SHUTOFF_MIN_SEVERITY = 0.9
@@ -98,8 +100,13 @@ def auto_shutoff_block_reason(
     now: datetime,
     active_use: bool | None,
     baseline_status: str | None = None,
+    commissioned: bool = True,
 ) -> str | None:
-    """First guard that forbids an automatic shut-off, or None when it is allowed."""
+    """First guard that forbids an automatic shut-off, or None when it is allowed.
+
+    ``commissioned`` is the per-flat gate (``flats.auto_shutoff_validated``); it is checked last
+    so that the "not commissioned" notice only appears when everything else would have allowed
+    the close."""
     if baseline_status == "learning":
         return "baseline_learning"
     if anomaly.anomaly_type not in SHUTOFF_TYPES:
@@ -114,6 +121,8 @@ def auto_shutoff_block_reason(
         return "no_recent_data"
     if active_use:
         return "active_use"
+    if not commissioned:
+        return NOT_COMMISSIONED
     return None
 
 
@@ -375,13 +384,39 @@ async def _try_auto_shutoff(
         return False
     if active_use is _UNSET:
         active_use = await _active_use(session, rt, flat, now)
-    reason = auto_shutoff_block_reason(alert, anomaly, now, active_use, flat.baseline_status)
+    reason = auto_shutoff_block_reason(
+        alert,
+        anomaly,
+        now,
+        active_use,
+        flat.baseline_status,
+        commissioned=flat.auto_shutoff_validated,
+    )
     if reason:
         log.info("auto_shutoff_blocked", alert=str(alert.id), reason=reason)
+        if reason == NOT_COMMISSIONED and alert.shutoff_uncommissioned_at is None:
+            # the alert stays at 'ticket' for a human; say so once, explicitly
+            alert.shutoff_uncommissioned_at = now
+            await _emit(
+                session,
+                rt,
+                flat,
+                alert,
+                "shutoff_not_commissioned",
+                "system",
+                {
+                    "notice": NOT_COMMISSIONED_NOTICE,
+                    "action_required": "close the valve manually if needed, or have an admin "
+                    "commission automatic shut-off for this flat",
+                },
+            )
+            changed_here = True
+        else:
+            changed_here = False
         if alert.shutoff_warned_at is not None:  # conditions changed during the warning window
             await _cancel_warning(session, rt, flat, alert, reason)
             return True
-        return False
+        return changed_here
 
     valves = ValveRepository(session)
     attempts, latest = await valves.auto_close_attempts(alert.id)

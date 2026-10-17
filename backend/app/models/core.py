@@ -53,6 +53,15 @@ class Flat(TimestampMixin, Base):
     baseline_status: Mapped[str] = mapped_column(
         sa.String(20), nullable=False, default="learning", server_default="learning"
     )
+    # commissioning gate: the system may close THIS flat's valve on its own (tier 4) only after
+    # an admin recorded that the valve, wiring and device were tested on site. Manual closes
+    # by staff are never affected.
+    auto_shutoff_validated: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    auto_shutoff_validated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    auto_shutoff_validated_by: Mapped[str | None] = mapped_column(sa.String(100))
+    auto_shutoff_notes: Mapped[str | None] = mapped_column(sa.String(1000))
 
 
 class User(Base):

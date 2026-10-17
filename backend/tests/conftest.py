@@ -124,7 +124,9 @@ async def login(client, username: str, password: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
-async def add_society(db: Database, slug: str, name: str, units: list[str]):
+async def add_society(
+    db: Database, slug: str, name: str, units: list[str], *, commissioned: bool = True
+):
     async with db.session() as s:
         society = await SocietyRepository(s).create(name=name, slug=slug, total_flats=len(units))
         flats = [
@@ -135,6 +137,7 @@ async def add_society(db: Database, slug: str, name: str, units: list[str]):
                 residents=3,
                 sensor_id=f"{slug}.{u}",
                 baseline_status="ready",  # not 'learning': alerts may reach tier 3
+                auto_shutoff_validated=commissioned,  # tests of the gate pass False
             )
             for u in units
         ]

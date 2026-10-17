@@ -2,17 +2,29 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
 from app.access import require_staff_scope, society_in_scope
 from app.dependencies import AdminUser, CallerScope, Session
-from app.repositories import AuditRepository, FlatRepository, SocietyRepository
+from app.repositories import (
+    AuditRepository,
+    DeviceStatusRepository,
+    FlatRepository,
+    SocietyRepository,
+)
 from app.schemas.admin import SocietyCreate, SocietyUpdate
 from app.schemas.common import Limit, Offset
-from app.schemas.domain import SocietyOut, SocietyStats
-from app.services.ingest import OFFLINE_AFTER
+from app.schemas.domain import (
+    DeviceHealth,
+    DeviceStatusOut,
+    SensorStatus,
+    SocietyOut,
+    SocietyStats,
+)
+from app.services.ingest import OFFLINE_AFTER, sensor_status
 
 router = APIRouter(prefix="/societies", tags=["societies"])
 
@@ -112,3 +124,32 @@ async def society_stats(society_id: uuid.UUID, session: Session, scope: CallerSc
         volume_24h_l=round(float(row["volume_24h_l"]), 1),
         sensors_offline=int(row["sensors_offline"]),
     )
+
+
+@router.get("/{society_id}/devices", response_model=list[DeviceHealth])
+async def society_devices(
+    society_id: uuid.UUID,
+    session: Session,
+    scope: CallerScope,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Offset = 0,
+):
+    """Device health per flat: sensor status plus the firmware-reported values (battery,
+    firmware, valve position, error codes). Staff only."""
+    await society_in_scope(session, scope, society_id)
+    require_staff_scope(scope)
+    now = datetime.now(UTC)
+    rows = await DeviceStatusRepository(session).for_society(society_id, limit=limit, offset=offset)
+    return [
+        DeviceHealth(
+            flat_id=flat.id,
+            unit_number=flat.unit_number,
+            sensor_status=SensorStatus(
+                status=sensor_status(health.last_seen if health else None, now),
+                last_seen=health.last_seen if health else None,
+                missed_readings=health.missed_readings if health else 0,
+            ),
+            device=DeviceStatusOut.model_validate(dev) if dev else None,
+        )
+        for flat, health, dev in rows
+    ]

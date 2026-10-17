@@ -38,4 +38,3 @@ class TemplateExplainer:
         parts[0] += "."
         parts.append(TIER_ACTION.get(int(ctx.get("tier", 1)), TIER_ACTION[1]))
         return " ".join(parts)
-
