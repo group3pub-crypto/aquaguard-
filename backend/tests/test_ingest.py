@@ -195,7 +195,7 @@ async def test_flow_triggers_detection_alert_and_ws_broadcast(rt, db, world):
         return 0
 
     rt.ws.broadcast = capture
-    base = datetime.now(UTC).timestamp() - 600
+    base = datetime.now(UTC).timestamp() - 540
     for i in range(12):  # 5.5 min of 30 L/min continuous flow: looks like a burst
         await ingest.handle_message(
             rt, TOPIC, flow_msg(mid=f"{i:08x}", ts=base + i * 30, flow=30.0)

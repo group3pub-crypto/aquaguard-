@@ -70,16 +70,17 @@ def test_hour_of_week_follows_configured_timezone():
         bl.configure_timezone("UTC")
 
 
-def full_slots(n=30, **over):
+def full_slots(n=30, over=None):
+    over = over or {}
     return [{"slot": i, "sample_count": over.get(i, n)} for i in range(168)]
 
 
 def test_ready_needs_14_days_and_every_slot_sampled():
     assert bl.status_for(13, full_slots()) == "learning"  # not enough distinct days
     assert bl.status_for(14, full_slots()) == "ready"
-    assert bl.status_for(30, full_slots(**{5: 29})) == "learning"  # ONE thin slot is enough
-    assert bl.status_for(30, full_slots(**{167: 0})) == "learning"
-    assert bl.status_for(30, full_slots(**{5: 30})) == "ready"
+    assert bl.status_for(30, full_slots(over={5: 29})) == "learning"  # ONE thin slot is enough
+    assert bl.status_for(30, full_slots(over={167: 0})) == "learning"
+    assert bl.status_for(30, full_slots(over={5: 30})) == "ready"
     assert bl.status_for(30, full_slots()[:100]) == "learning"  # malformed
     assert bl.status_for(30, None) == "learning" and bl.status_for(30) == "learning"
 
@@ -164,7 +165,7 @@ async def test_short_history_stays_learning_and_goes_stale_after_30_days(db):
         b = await bl.train_baseline(s, flat, now=end)
         assert flat.baseline_status == "learning" and b.sample_days < 14
         flat.baseline_status = "ready"
-        assert bl.STALE_AFTER == timedelta(days=30)
+        assert timedelta(days=30) == bl.STALE_AFTER
         # 8 days (the old limit) and 29 days are still fine ...
         assert await bl.refresh_status(s, flat, b.trained_to + timedelta(days=8)) == "ready"
         assert await bl.refresh_status(s, flat, b.trained_to + timedelta(days=29)) == "ready"

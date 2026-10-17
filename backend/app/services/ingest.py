@@ -185,9 +185,8 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
         raise
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
-    if rt.ws.count:
-        out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
-        await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
+    out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
+    await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
     # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
     # future beyond the configured skew (accelerated demo simulator), so a stale or forged ts
     # can never move the detection window

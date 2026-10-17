@@ -12,7 +12,7 @@ autosave_interval 300
 max_connections 2000
 max_packet_size 65536
 max_inflight_messages 100
-max_queued_messages 5000
+max_queued_messages 50000
 
 log_dest stdout
 log_type error

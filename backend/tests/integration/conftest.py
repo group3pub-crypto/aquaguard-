@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from app.seed import seed_demo
 from sqlalchemy import text
 
 from alembic import command
 from app.database import Database
 from app.main import create_app
 from app.rate_limit import limiter
-from app.seed import seed_demo
 from tests.conftest import FakePublisher, make_settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
