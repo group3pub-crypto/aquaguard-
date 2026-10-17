@@ -12,63 +12,184 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# TODO(supply-chain): actions are pinned to major tags. Pin to full commit SHAs with
+#   `sh infra/scripts/pin-actions.sh` (needs `gh auth`); Dependabot then keeps the SHAs fresh.
+env:
+  RUFF_VERSION: "0.17.1"
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install "ruff==${RUFF_VERSION}"
+      - run: ruff check backend ml edge bot infra libs
+      - run: ruff format --check backend ml edge bot infra libs
+      - name: shellcheck
+        run: |
+          shellcheck -S warning -s sh infra/scripts/*.sh infra/backup/backup.sh infra/backup/restore.sh \
+            infra/postgres/10-roles.sh infra/mosquitto/*.sh
+          shellcheck -S warning -s bash infra/backup/restore-test.sh
+      - name: .env.example <-> compose <-> config modules
+        run: python infra/scripts/check_env.py --lint
+      - name: compose files (render, policy, paths)
+        run: python infra/scripts/check_compose.py
+      - name: Caddyfile
+        run: |
+          docker run --rm -e PUBLIC_DOMAIN=localhost -e CADDY_TLS=internal \
+            -v "$PWD/infra/caddy:/etc/caddy:ro" caddy:2.10.0-alpine \
+            caddy validate --config /etc/caddy/Caddyfile
+      - name: workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
+      - name: Prometheus rules (example files)
+        continue-on-error: true  # UNTESTED examples: advisory until verified against a live Prometheus
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/infra/monitoring:/m:ro" \
+            prom/prometheus:v2.55.1 check rules /m/alerts.yml
+
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install -e "backend[dev]" pytest-cov ruff mypy
-      - run: ruff check backend
-      - run: ruff format --check backend
+          cache-dependency-path: |
+            backend/pyproject.toml
+            libs/aquaguard_features/pyproject.toml
+      - run: pip install -e libs/aquaguard_features
+      - run: pip install -e "backend[dev]" pytest-cov mypy
       - run: mypy backend/app
         continue-on-error: true
+      # SECRET_KEY must NOT be set: test_config asserts the generated-key behaviour of
+      # non-production environments.
       - run: pytest --cov=app --cov-report=term-missing --cov-report=xml
         working-directory: backend
         env:
           ENVIRONMENT: test
-          SECRET_KEY: ci-only-test-key-not-a-secret-0123456789abcdef
       - uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.11'
         with:
           name: backend-coverage
           path: backend/coverage.xml
 
-  ml:
+  # Real PostgreSQL 16 + real Mosquitto (auth + per-device ACL rendered by infra/mosquitto).
+  integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.6-bookworm
+        env:
+          POSTGRES_USER: aquaguard
+          POSTGRES_PASSWORD: ${{ github.run_id }}-ci-only-pg
+          POSTGRES_DB: aquaguard_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aquaguard -d aquaguard_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://aquaguard:${{ github.run_id }}-ci-only-pg@127.0.0.1:5432/aquaguard_test
+      TEST_MQTT_HOST: 127.0.0.1
+      TEST_MQTT_PORT: "1883"
+      TEST_MQTT_USERNAME: aquaguard-backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - run: |
-          if [ -f ml/requirements.txt ]; then pip install -r ml/requirements.txt; else pip install -e ml; fi
-          pip install pytest ruff
-      - run: ruff check ml
+          cache-dependency-path: |
+            backend/pyproject.toml
+            libs/aquaguard_features/pyproject.toml
+      - name: Generate throw-away broker secrets
+        run: |
+          echo "TEST_MQTT_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          echo "TEST_MQTT_DEVICE_SECRET=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Start Mosquitto (config via env)
+        run: |
+          docker run -d --name mosquitto --network host \
+            -e MQTT_USERNAME="$TEST_MQTT_USERNAME" -e MQTT_PASSWORD="$TEST_MQTT_PASSWORD" \
+            -e MQTT_DEVICE_SECRET="$TEST_MQTT_DEVICE_SECRET" \
+            -e MQTT_DEVICES="green-valley/101,green-valley/102" \
+            -v "$PWD/infra/mosquitto:/mosquitto/config:ro" \
+            --entrypoint /bin/sh eclipse-mosquitto:2.0.20 /mosquitto/config/entrypoint.sh
+          for i in $(seq 1 30); do
+            docker run --rm --network host eclipse-mosquitto:2.0.20 mosquitto_pub -h 127.0.0.1 \
+              -u "$TEST_MQTT_USERNAME" -P "$TEST_MQTT_PASSWORD" -t aquaguard/ci -m up && exit 0
+            sleep 1
+          done
+          docker logs mosquitto; exit 1
+      - run: pip install -e libs/aquaguard_features
+      - run: pip install -e "backend[dev]"
+      - name: Integration tests (migrations, repositories, ingest races, MQTT, ACL)
+        working-directory: backend
+        run: pytest tests/integration -m integration -v
+        env:
+          ENVIRONMENT: test
+      - if: failure()
+        run: docker logs mosquitto
+
+  ml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            ml/pyproject.toml
+            libs/aquaguard_features/pyproject.toml
+      - run: pip install -e libs/aquaguard_features -e "ml[dev]"
       - run: pytest ml/tests
 
   edge:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: |
-          if [ -f edge/requirements.txt ]; then pip install -r edge/requirements.txt; else pip install -e edge; fi
-          pip install pytest ruff
-      - run: ruff check edge
+          cache-dependency-path: edge/pyproject.toml
+      - run: pip install -e "edge[dev]"
       - run: pytest edge/tests
+
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: bot/pyproject.toml
+      - run: pip install -e "bot[dev]"
+      - run: pytest
+        working-directory: bot
 
   dashboard:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: dashboard
@@ -76,7 +197,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci
@@ -85,29 +206,19 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  bot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - run: pip install -e "bot[dev]" ruff
-      - run: ruff check bot
-      - run: pytest
-        working-directory: bot
-
   docker:
     runs-on: ubuntu-latest
-    needs: [backend, dashboard, bot]
+    timeout-minutes: 30
+    needs: [lint, backend, dashboard, bot, edge]
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - {name: backend, context: backend, file: backend/Dockerfile}
+          - {name: backend, context: ., file: backend/Dockerfile}
           - {name: dashboard, context: dashboard, file: dashboard/Dockerfile}
           - {name: bot, context: bot, file: bot/Dockerfile}
           - {name: edge, context: ., file: edge/Dockerfile}
+          - {name: backup, context: infra/backup, file: infra/backup/Dockerfile}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -116,31 +227,70 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Trains the shipped models inside the backend image (ml/Dockerfile.models).
+  docker-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [lint, backend, ml]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          load: true
+          tags: aquaguard-backend:ci
+          cache-from: type=gha,scope=backend
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ml/Dockerfile.models
+          build-contexts: backend=docker-image://aquaguard-backend:ci
+          push: false
+          cache-from: type=gha,scope=models
+          cache-to: type=gha,mode=max,scope=models
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: pip-audit (reporting only)
-        continue-on-error: true
+        with: {fetch-depth: 0}
+      - name: gitleaks (pinned binary, checksum verified; no license needed)
         run: |
-          pip install pip-audit
-          for d in backend ml edge bot; do
-            [ -f $d/requirements.txt ] && pip-audit -r $d/requirements.txt || true
-          done
+          v=8.21.2
+          curl -sSfL -o gl.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz"
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  gl.tgz" | sha256sum -c -
+          tar xzf gl.tgz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: pip-audit (gating; allow-list .github/audit-allowlist.json)
+        run: |
+          pip install pip-audit -e libs/aquaguard_features -e backend -e ml -e edge -e bot
+          pip-audit --skip-editable -f json -o pip-audit.json || true
+          python infra/scripts/audit_gate.py pip pip-audit.json
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: npm audit (reporting only)
+        with: {node-version: 22}
+      - name: npm audit, production dependencies (gating at high)
+        working-directory: dashboard
+        run: |
+          npm audit --omit=dev --json > ../npm-audit.json || true
+          python3 ../infra/scripts/audit_gate.py npm ../npm-audit.json
+      - name: npm audit, dev dependencies (report only; they are not shipped)
+        working-directory: dashboard
         continue-on-error: true
-        run: cd dashboard && npm audit --audit-level=high
+        run: npm audit --audit-level=high
+
+  # Single required status check for branch protection.
+  ci-success:
+    if: always()
+    needs: [lint, backend, integration, ml, edge, bot, dashboard, docker, docker-models, security]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '${{ toJSON(needs) }}' | grep -Eq '"result": "(failure|cancelled)"' && exit 1 || exit 0

@@ -10,6 +10,7 @@ import { FlowChart } from '@/components/FlowChart';
 import { DataState } from '@/components/States';
 import { ValveControls } from '@/components/ValveControls';
 import { StatusBadge } from '@/components/StatusBadge';
+import { DevicePanel } from '@/components/DevicePanel';
 
 export function FlatView({ flatId }: { flatId: string }) {
   const d = useFlatData(flatId);
@@ -79,6 +80,8 @@ export function FlatView({ flatId }: { flatId: string }) {
           )}
         </DataState>
       </section>
+
+      {d.flat.data?.device ? <DevicePanel device={d.flat.data.device} /> : null}
 
       <section aria-labelledby="chart-h" className="card">
         <h2 id="chart-h" className="mb-4 text-xl font-semibold">

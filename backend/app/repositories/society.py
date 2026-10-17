@@ -37,7 +37,12 @@ class SocietyRepository(BaseRepository[Society]):
         return await self.get(id_) is not None
 
     async def stats(
-        self, society_id: uuid.UUID, now: datetime, *, volume_from: datetime, offline_before: datetime
+        self,
+        society_id: uuid.UUID,
+        now: datetime,
+        *,
+        volume_from: datetime,
+        offline_before: datetime,
     ) -> dict[str, float | int]:
         """Dashboard numbers for one society as four aggregate queries (no row loading)."""
         ex = self.session.execute

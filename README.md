@@ -27,10 +27,16 @@ Alert tiers: `watch -> alert -> ticket -> critical` (see `docs/architecture.md`)
 Requirements: Docker with Compose v2, `make`, `openssl`.
 
 ```bash
-make demo        # creates .env with random secrets, builds, starts, seeds demo data
+make env                 # .env with fresh random secrets (never overwrites)
+$EDITOR .env             # PUBLIC_DOMAIN, CADDY_TLS, MQTT_TLS_* (see docs/deployment.md)
+make up                  # production stack: TLS proxy, backend, dashboard, Postgres, Mosquitto
+make bootstrap-admin     # first admin; the password is prompted, never passed on a command line
 ```
 
-Then open http://localhost:3000 (API docs: http://localhost:8000/docs). Demo passwords are in `.env` (`DEMO_ADMIN_PASSWORD`, `DEMO_RESIDENT_PASSWORD`). `make help` lists all targets. A 3-minute walkthrough is in `docs/demo_script.md`.
+Then open `https://$PUBLIC_DOMAIN`. For local development use `make dev-up` (plain HTTP on 127.0.0.1,
+auto-reload); the sensor simulator (`make sim-up`) is a development/test tool and is never part of the
+production stack. `make help` lists all targets; `docs/deployment.md` covers TLS, backups, monitoring
+and upgrades, `docs/ci-cd.md` the pipelines.
 
 ## Layout
 
@@ -42,7 +48,7 @@ Then open http://localhost:3000 (API docs: http://localhost:8000/docs). Demo pas
 | `ml/` | Data generation, training scripts, `reports/`, `models/` (gitignored) |
 | `bot/` | Telegram bot and tool registry |
 | `infra/` | Mosquitto config, Postgres init, load test, helper scripts |
-| `docs/` | Architecture, API, MQTT, security, limitations, demo script |
+| `docs/` | Architecture, API, MQTT, security, deployment, CI/CD, limitations |
 
 ## Security model
 
@@ -50,11 +56,11 @@ Then open http://localhost:3000 (API docs: http://localhost:8000/docs). Demo pas
 |---|---|
 | resident | read data (any authenticated user) |
 | maintenance | read + acknowledge / snooze / resolve alerts |
-| admin | all of the above + valve control, overrides, demo controls, role changes, retrain, forecast generation |
+| admin | all of the above + valve control, overrides, role changes, retrain, forecast generation |
 
-- Fail-closed secrets: with `ENVIRONMENT=production` the backend refuses to start without a `SECRET_KEY` of at least 32 characters; compose refuses to start without `SECRET_KEY`, `POSTGRES_PASSWORD`, `MQTT_PASSWORD`; `CHANGE_ME` placeholders are rejected.
+- Fail-closed secrets: with `ENVIRONMENT=production` the backend refuses to start without a `SECRET_KEY` of at least 32 characters; compose refuses to start without `SECRET_KEY`, the database passwords and `MQTT_PASSWORD`; the backend (production), the Mosquitto entrypoint, the bot and the database init script each reject `CHANGE_ME` placeholders for the secrets they consume, and `make check-env` checks them all (see the table at the top of `.env.example`).
 - MQTT broker disallows anonymous clients; its password file is generated at start from env.
-- All published ports bind to 127.0.0.1; Postgres is not published except by the dev override.
+- Production publishes only 80/443 (Caddy, automatic HTTPS) and 8883 (MQTT over TLS); backend, dashboard, Postgres and the plain MQTT listener are reachable only on private networks. The development overlay publishes on 127.0.0.1 only.
 - Rate limiting and WebSocket authentication are enforced by the backend; details in `docs/security.md`.
 - Containers use `no-new-privileges`, read-only root filesystems where feasible, non-root users.
 

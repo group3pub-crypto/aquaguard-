@@ -72,12 +72,38 @@ export function isOpenAlert(a: Alert): boolean {
   return (OPEN_ALERT_STATES as readonly string[]).includes(String(a.state));
 }
 
+/**
+ * Subtle provenance label for an alert message. "AI-written" is shown ONLY for the backend's
+ * `anthropic` source; `template` and `template_fallback` (AI unavailable) are fixed templates.
+ */
 export function describeSource(source: string | null | undefined): string {
-  if (!source) return 'unknown source';
-  const s = source.toLowerCase();
-  if (/(llm|ai|claude|gpt|model)/.test(s)) return `AI-generated (${source})`;
-  if (/(template|rule|fallback)/.test(s)) return `Template (${source})`;
-  return source;
+  switch ((source ?? '').toLowerCase()) {
+    case 'anthropic':
+      return 'AI-written';
+    case 'template':
+      return 'Template';
+    case 'template_fallback':
+      return 'Template (AI unavailable)';
+    case '':
+      return 'Source unknown';
+    default:
+      return `Source: ${source}`;
+  }
+}
+
+const SHUTOFF_CLAIM = /(shut\s*-?\s*off|shut\s+down|turned\s+off|cut\s+off|closed)[^.]*\b(water|supply|valve)|\b(water|supply|valve)[^.]*(shut\s*-?\s*off|shut\s+down|turned\s+off|cut\s+off|has\s+been\s+closed|was\s+closed)/i;
+
+/**
+ * Safety net: never show a claim that water was shut off unless the alert is in the
+ * CONFIRMED `auto_shutoff` state (the device acknowledged the close). Anything else that
+ * reads like such a claim is withheld.
+ */
+export function safeAlertMessage(a: Pick<Alert, 'state' | 'message'>): string {
+  const msg = a.message ?? 'No message provided.';
+  if (String(a.state) !== 'auto_shutoff' && SHUTOFF_CLAIM.test(msg)) {
+    return 'Leak alert. The supply has NOT been confirmed closed - check the flat.';
+  }
+  return msg;
 }
 
 /** Aria-friendly relative sort: newest first. */

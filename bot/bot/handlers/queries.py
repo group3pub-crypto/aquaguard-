@@ -33,10 +33,49 @@ def match_intent(text: str) -> tuple[str, dict] | None:
 
 
 async def on_text(update: Any, context: Any) -> None:
-    intent = match_intent(update.effective_message.text or "")
-    if intent is None:
-        from bot.deps import get_deps, reply
+    from bot.deps import get_deps, reply
 
-        await reply(update, get_deps(context), "Sorry, I did not understand. Try /start for help.")
+    deps = get_deps(context)
+    text = update.effective_message.text or ""
+    nlu = getattr(deps, "nlu", None)
+    principal = deps.store.principal_of(update.effective_user.id) if nlu is not None else None
+    if nlu is not None and principal is not None:
+        from bot.nlu import NluUnavailable
+
+        try:
+            result = await nlu.handle(text, principal, update.effective_chat.id, deps.api)
+        except NluUnavailable as exc:
+            await reply(update, deps, f"Smart mode is unavailable ({exc.public}); using basic keyword matching.")
+        else:
+            await deliver(update, deps, result)
+            return
+    intent = match_intent(text)
+    if intent is None:
+        await reply(update, deps, "Sorry, I did not understand. Try /start for help.")
         return
     await run_tool(update, context, *intent)
+
+
+async def deliver(update: Any, deps: Any, result: Any) -> None:
+    """Send the model's answer, then one confirmation-button message per proposed action."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    from bot.deps import reply
+
+    uid, chat_id = update.effective_user.id, update.effective_chat.id
+    if result.text:
+        await reply(update, deps, result.text)
+    for prop in result.proposals:
+        token = deps.confirm.create(uid, chat_id, prop.confirm_payload())
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(prop.confirm_label, callback_data=f"{prop.callback_kind}:yes:{token}"),
+                    InlineKeyboardButton("Cancel", callback_data=f"{prop.callback_kind}:no:{token}"),
+                ]
+            ]
+        )
+        sent = await reply(update, deps, prop.describe(), reply_markup=kb)
+        mid = getattr(sent, "message_id", None)
+        if isinstance(mid, int):
+            deps.confirm.bind_message(token, mid)

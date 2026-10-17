@@ -60,9 +60,7 @@ async def provision(dsn: str, society: str, meters: int) -> None:
             )  # fmt: skip
         have = {
             r["unit_number"]
-            for r in await conn.fetch(
-                "SELECT unit_number FROM flats WHERE society_id=$1", sid
-            )
+            for r in await conn.fetch("SELECT unit_number FROM flats WHERE society_id=$1", sid)
         }
         rows = [
             (uuid.uuid4(), sid, unit(i), f"{society}-{unit(i)}")
@@ -149,30 +147,24 @@ async def main() -> None:
     ap.add_argument("--port", type=int, default=int(os.getenv("MQTT_PORT", "1883")))
     ap.add_argument("--meters", type=int, default=500)
     ap.add_argument("--duration", type=float, default=30.0, help="seconds")
-    ap.add_argument(
-        "--interval", type=float, default=1.0, help="seconds between msgs per meter"
-    )
+    ap.add_argument("--interval", type=float, default=1.0, help="seconds between msgs per meter")
     ap.add_argument("--society", default="loadtest", help="society slug")
-    ap.add_argument(
-        "--connections", type=int, default=5, help="MQTT connections to spread over"
-    )
-    ap.add_argument(
-        "--db-url", default=None, help="enable DB-side measurement + provisioning"
-    )
-    ap.add_argument(
-        "--backend-pid", type=int, default=None, help="measure this process' CPU"
-    )
+    ap.add_argument("--connections", type=int, default=5, help="MQTT connections to spread over")
+    ap.add_argument("--db-url", default=None, help="enable DB-side measurement + provisioning")
+    ap.add_argument("--backend-pid", type=int, default=None, help="measure this process' CPU")
     ap.add_argument("--drain-timeout", type=float, default=60.0)
+    ap.add_argument(
+        "--min-landed-pct",
+        type=float,
+        default=None,
+        help="exit 1 unless at least this percentage of published messages landed (needs --db-url)",
+    )
     args = ap.parse_args()
 
     user, pwd = os.getenv("MQTT_USERNAME"), os.getenv("MQTT_PASSWORD")
     if not user or not pwd:
         raise SystemExit("set MQTT_USERNAME and MQTT_PASSWORD")
-    dsn = (
-        args.db_url.replace("postgresql+asyncpg://", "postgresql://")
-        if args.db_url
-        else None
-    )
+    dsn = args.db_url.replace("postgresql+asyncpg://", "postgresql://") if args.db_url else None
     if dsn:
         await provision(dsn, args.society, args.meters)
 
@@ -230,11 +222,10 @@ async def main() -> None:
     total = sum(counts)
     cpu1 = cpu_seconds(args.backend_pid) if args.backend_pid else None
     print(
-        f"meters={args.meters} duration={elapsed:.1f}s target={args.meters / args.interval:.0f} msg/s"
+        f"meters={args.meters} duration={elapsed:.1f}s "
+        f"target={args.meters / args.interval:.0f} msg/s"
     )
-    print(
-        f"published={total} errors={errors[0]} publish_rate={total / elapsed:.1f} msg/s"
-    )
+    print(f"published={total} errors={errors[0]} publish_rate={total / elapsed:.1f} msg/s")
 
     if dsn:
         import asyncpg
@@ -265,10 +256,19 @@ async def main() -> None:
             f"p99={percentile(seen_lat, 99):.3f} max={max(seen_lat, default=float('nan')):.3f}"
         )
     if cpu0 is not None and cpu1 is not None:
-        print(f"backend CPU: {(cpu1 - cpu0):.1f} cpu-s over {elapsed:.1f}s = "
-              f"{100 * (cpu1 - cpu0) / elapsed:.0f}% of one core (publish window only)")  # fmt: skip
+        pct = 100 * (cpu1 - cpu0) / elapsed
+        print(
+            f"backend CPU: {cpu1 - cpu0:.1f} cpu-s over {elapsed:.1f}s = "
+            f"{pct:.0f}% of one core (publish window only)"
+        )
     if not dsn:
         print("NOTE: publisher-side only; pass --db-url to measure backend ingestion.")
+    elif args.min_landed_pct is not None and 100 * landed / max(total, 1) < args.min_landed_pct:
+        raise SystemExit(
+            f"FAIL: only {100 * landed / max(total, 1):.1f}% landed (< {args.min_landed_pct}%)"
+        )
+    if errors[0]:
+        raise SystemExit(f"FAIL: {errors[0]} publish errors")
 
 
 if __name__ == "__main__":

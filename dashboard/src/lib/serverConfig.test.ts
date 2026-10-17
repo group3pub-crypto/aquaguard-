@@ -9,6 +9,8 @@ describe('runtime config + CSP', () => {
       apiUrl: 'https://api.example.com',
       wsUrl: 'wss://api.example.com',
       timezone: 'UTC',
+      allowSelfRegistration: false,
+      shutoffWarningSeconds: 300,
     });
     expect(readRuntimeConfig({ NEXT_PUBLIC_API_URL: 'http://a:1', NEXT_PUBLIC_WS_URL: 'ws://b:2', NEXT_PUBLIC_BACKEND_TZ: 'Asia/Kolkata' })).toMatchObject({
       apiUrl: 'http://a:1',
@@ -17,8 +19,16 @@ describe('runtime config + CSP', () => {
     });
   });
 
+  it('self-registration is off by default and follows ALLOW_SELF_REGISTRATION; warning seconds are configurable', () => {
+    expect(readRuntimeConfig({}).allowSelfRegistration).toBe(false);
+    expect(readRuntimeConfig({ ALLOW_SELF_REGISTRATION: 'true' }).allowSelfRegistration).toBe(true);
+    expect(readRuntimeConfig({ ALLOW_SELF_REGISTRATION: 'nope' }).allowSelfRegistration).toBe(false);
+    expect(readRuntimeConfig({ SHUTOFF_WARNING_SECONDS: '120' }).shutoffWarningSeconds).toBe(120);
+    expect(readRuntimeConfig({ SHUTOFF_WARNING_SECONDS: '-4' }).shutoffWarningSeconds).toBe(300);
+  });
+
   it('script-src uses the nonce and never unsafe-inline; connect-src follows config', () => {
-    const csp = buildCsp('abc', { apiUrl: 'https://api.x.io', wsUrl: 'wss://api.x.io', timezone: 'UTC' }, false);
+    const csp = buildCsp('abc', { apiUrl: 'https://api.x.io', wsUrl: 'wss://api.x.io', timezone: 'UTC', allowSelfRegistration: false, shutoffWarningSeconds: 300 }, false);
     const script = csp.split('; ').find((d) => d.startsWith('script-src')) ?? '';
     expect(script).toContain("'nonce-abc'");
     expect(script).not.toContain('unsafe-inline');

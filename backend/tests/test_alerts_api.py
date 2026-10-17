@@ -16,17 +16,21 @@ async def new(db, rt, world, **kw):
 async def test_list_filter_and_pagination(client, db, rt, world):
     for i, atype in enumerate(["leak", "burst", "overuse"]):
         await make_alert(db, rt, world.flats[i].id, atype=atype, severity=0.6)
-    r = await client.get(f"{API}/alerts", headers=world.resident)
+    r = await client.get(f"{API}/alerts", headers=world.maintenance)
     assert r.status_code == 200 and len(r.json()) == 3
-    assert len((await client.get(f"{API}/alerts?limit=2", headers=world.resident)).json()) == 2
+    assert len((await client.get(f"{API}/alerts?limit=2", headers=world.maintenance)).json()) == 2
     assert (
-        len((await client.get(f"{API}/alerts?limit=2&offset=2", headers=world.resident)).json())
+        len((await client.get(f"{API}/alerts?limit=2&offset=2", headers=world.maintenance)).json())
         == 1
     )
-    by_flat = await client.get(f"{API}/alerts?flat_id={world.flats[1].id}", headers=world.resident)
+    by_flat = await client.get(
+        f"{API}/alerts?flat_id={world.flats[1].id}", headers=world.maintenance
+    )
     assert len(by_flat.json()) == 1
-    assert (await client.get(f"{API}/alerts?state=alert", headers=world.resident)).json() != []
-    assert (await client.get(f"{API}/alerts?state=resolved", headers=world.resident)).json() == []
+    assert (await client.get(f"{API}/alerts?state=alert", headers=world.maintenance)).json() != []
+    assert (
+        await client.get(f"{API}/alerts?state=resolved", headers=world.maintenance)
+    ).json() == []
 
 
 async def test_pagination_bounds(client, world):

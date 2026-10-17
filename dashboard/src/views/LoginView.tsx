@@ -4,6 +4,7 @@ import type { FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthProvider';
+import { registrationAvailable } from '@/lib/features';
 
 export function LoginView() {
   const { login, status } = useAuth();
@@ -12,6 +13,9 @@ export function LoginView() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Resolved after mount: the runtime config is only on `window` in the browser.
+  const [canRegister, setCanRegister] = useState(false);
+  useEffect(() => setCanRegister(registrationAvailable()), []);
 
   useEffect(() => {
     if (status === 'authenticated') router.replace('/');
@@ -49,7 +53,7 @@ export function LoginView() {
           <input id="password" type="password" className="field" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         {error ? (
-          <p role="alert" className="text-sm text-error">
+          <p id="login-error" role="alert" className="text-sm text-error">
             {error}
           </p>
         ) : null}
@@ -57,12 +61,16 @@ export function LoginView() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      <p className="mt-6 text-sm text-ink-2">
-        No account?{' '}
-        <Link href="/register" className="font-semibold text-action">
-          Register
-        </Link>
-      </p>
+      {canRegister ? (
+        <p className="mt-6 text-sm text-ink-2">
+          No account?{' '}
+          <Link href="/register" className="font-semibold text-action">
+            Register
+          </Link>
+        </p>
+      ) : (
+        <p className="mt-6 text-sm text-ink-2">Need an account? Ask your administrator to create one.</p>
+      )}
     </main>
   );
 }

@@ -1,0 +1,72 @@
+# DEVELOPMENT overlay - never use in production.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build   (= make dev-up)
+#
+# Differences from production: ENVIRONMENT=development, plain HTTP on 127.0.0.1 (no TLS proxy),
+# services published on loopback only, code bind-mounted with auto-reload, writable root FS.
+# The sensor SIMULATOR lives here too (profile `sim`): a development/test tool that publishes
+# SYNTHETIC readings. It must never run in production.
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+    networks: [data, app]   # port publishing needs a non-internal network
+
+  mosquitto:
+    ports: ["127.0.0.1:1883:1883"]
+    environment:
+      # optional read-only client for simulator fault injection (see edge/README.md)
+      MQTT_CONTROL_USERNAME: ${MQTT_CONTROL_USERNAME:-}
+      MQTT_CONTROL_PASSWORD: ${MQTT_CONTROL_PASSWORD:-}
+
+  backend:
+    read_only: false
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      ENABLE_DOCS: "true"
+      ALLOWED_ORIGINS: http://localhost:3000
+      MODEL_MANIFEST_REQUIRED: "false"
+    # the image ENTRYPOINT would swallow `command`, so replace the entrypoint. Migrations are NOT
+    # run here (the app role cannot DDL): use `make migrate`.
+    entrypoint:
+      - sh
+      - -c
+      - exec uvicorn app.main:app_factory --factory --host 0.0.0.0 --port 8000 --reload --reload-dir /srv/backend/app
+    volumes:
+      - ./backend/app:/srv/backend/app
+      - ./backend/alembic:/srv/backend/alembic
+
+  dashboard:
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      AQUAGUARD_API_URL: http://localhost:8000
+      AQUAGUARD_WS_URL: ws://localhost:8000
+
+  bot:
+    read_only: false
+
+  # DEVELOPMENT / TEST TOOL, NEVER IN PRODUCTION: simulated sensors (synthetic data).
+  # Start with `make sim-up`. The society/flats must exist in the backend (see edge/README.md).
+  simulator:
+    profiles: ["sim"]
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/simulator:${AQUAGUARD_TAG:-local}
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+    restart: "no"
+    init: true
+    command: ["--society", "dev-society", "--flats", "6", "--speed", "1", "--broker", "mosquitto:1883"]
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [app]
+    depends_on:
+      mosquitto: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 256m}

@@ -1,18 +1,59 @@
-// Copy to config.h (git-ignored) and fill in. Never commit real credentials.
+// Copy to config.h (git-ignored) and fill in. NEVER commit real credentials or private keys.
+// Every tunable below is optional: omitted ones fall back to the defaults in aquaguard_core.h.
 #pragma once
 
+// ---- Wi-Fi (2.4 GHz) ------------------------------------------------------------------
 #define WIFI_SSID       "your-wifi-ssid"
 #define WIFI_PASSWORD   "your-wifi-password"
 
+// ---- MQTT over TLS (port 8883). See docs/hardware/mqtt-tls-setup.md ----------------------
 #define MQTT_HOST       "broker.example.local"
-#define MQTT_PORT       1883
-#define MQTT_USER       ""          // empty = anonymous
-#define MQTT_PASSWORD   ""
+#define MQTT_PORT       8883
+// Per-device broker account. Use EXACTLY the username your provisioning method prints:
+//  - `python -m app.cli provision-sensor` prints "<society>.<unit>" (dot)
+//  - infra/mosquitto (MQTT_DEVICES + device_password.sh) and the simulator use "<society>/<unit>" (slash)
+// These two currently disagree; see docs/hardware/provisioning.md.
+#define MQTT_USER       "demo/101"
+#define MQTT_PASSWORD   "CHANGE_ME"
+// PEM of the CA that signed the broker certificate (public data, not a secret).
+// (a variable, not a #define: raw strings cannot span preprocessor lines)
+static const char MQTT_CA_CERT_PEM[] = R"EOF(-----BEGIN CERTIFICATE-----
+CHANGE_ME
+-----END CERTIFICATE-----
+)EOF";
+// DEV ONLY: skip certificate verification. Logs a loud warning on every connect. Never in production.
+// #define ALLOW_INSECURE_DEV
 
-#define SOCIETY_SLUG    "demo"      // topic: aquaguard/<society>/<unit>/...
+// ---- identity: topic aquaguard/<society>/<unit>/..., client id aquaguard-<society>-<unit> ----
+#define SOCIETY_SLUG    "demo"
 #define FLAT_UNIT       "101"
 
-#define FLOW_PIN        27          // YF-S201 signal (interrupt-capable, 3.3 V logic!)
-#define VALVE_RELAY_PIN 26          // relay for the normally-open solenoid valve
-#define VALVE_CLOSE_LEVEL HIGH      // relay level that energises (closes) the valve
-#define BATTERY_ADC_PIN 34          // optional divider; set -1 to report 100
+// ---- pins (see docs/hardware/wiring-and-electrical.md; 3.3 V logic ONLY) -------------------
+#define FLOW_PIN        27          // YF-S201 signal AFTER level shifting/divider
+#define VALVE_RELAY_PIN 26          // relay module IN (not a strapping pin)
+#define RELAY_ACTIVE_LOW 0          // 1 if the relay board energises on a LOW input. CHECK YOUR BOARD.
+#define BATTERY_ADC_PIN 34          // input-only ADC1 pin; set -1 if no battery divider (bat/vbat => null)
+
+// ---- calibration / limits (all optional) ---------------------------------------------------
+// #define PULSES_PER_LITRE        450.0f   // datasheet nominal 7.5 Hz per L/min; MEASURE with a jug
+// #define BATTERY_DIVIDER_RATIO   2.0f     // (R1+R2)/R2 of the real divider
+// #define TZ_OFFSET_S             19800    // local = UTC + this; used for the night-leak window
+// #define MAX_BACKFILL_S          540      // keep below the backend's stale-reading limit
+// #define FLOW_PERIOD_S           60
+// #define HEARTBEAT_PERIOD_S      300
+// #define CONTINUOUS_FLOW_MIN     120
+// #define MIN_LEAK_FLOW_LPM       0.5f
+// #define BURST_FLOW_LPM          20.0f
+// #define BURST_SUSTAIN_S         60
+// #define NIGHT_START_H           1
+// #define NIGHT_END_H             5
+// #define ZERO_GAP_RESET_S        120
+// #define COIL_DUTY_WARN_S        0        // set from the valve datasheet continuous-duty rating
+
+// ---- safety gates (defaults are the safe ones) ---------------------------------------------
+// Local autonomous shut-off: OFF. Needs hil-test-plan.md Stage 3 + a deliberate decision.
+// #define LOCAL_AUTOSHUTOFF_ENABLED 1
+// Accept src:"auto" close commands from the backend. OFF until docs/hardware/hil-test-plan.md passes.
+// #define ACCEPT_AUTO_CLOSE 1
+// Publish valve/state with cmd_id "boot" after reboot (needs backend support; see docs/hardware/valve-safety.md).
+// #define PUBLISH_BOOT_VALVE_STATE 1

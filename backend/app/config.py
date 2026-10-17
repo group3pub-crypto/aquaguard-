@@ -137,17 +137,29 @@ class Settings(BaseSettings):
     # readings stamped further in the future than this are rejected (clock-skew guard)
     mqtt_max_future_skew_s: float = Field(300.0, ge=0)
     mqtt_client_id: str = "aquaguard-backend"
+    # live readings older than this are rejected (stale/replayed); history goes through the
+    # admin-only ingest.backfill_readings() path, never through MQTT
+    mqtt_max_reading_age_s: float = Field(600.0, ge=1)
+    # per-device message budget (token bucket, per minute); 0 disables. Raise it for the
+    # accelerated edge simulator (--speed > 1), which emits one reading per simulated minute.
+    mqtt_device_rate_per_min: int = Field(120, ge=0)
+    mqtt_ca_file: Path | None = None  # set => TLS to the broker, verified against this CA
+    mqtt_worker_concurrency: int = Field(16, ge=1, le=256)
 
     # ml
     model_dir: Path = REPO_ROOT / "ml" / "models"
     model_manifest_required: bool | None = None  # default: required in production
     timezone: str = "UTC"
+    # rules = deterministic rules only; ml = RandomForest/IsolationForest (rules if models are
+    # missing); hybrid = rules gate + ML class/confidence/veto (rules only if models are missing
+    # or fail their manifest check). The default may change after ml/reports/benchmark.md is
+    # reviewed on real data.
+    detection_policy: Literal["rules", "ml", "hybrid"] = "hybrid"
     detect_debounce_seconds: float = 30.0
     # at most this many detections (CPU-bound ML) run at once; further triggers are shed and
     # retried on the flat's next reading so ingest never queues behind inference
     detect_max_concurrency: int = Field(2, ge=1, le=64)
     dead_letter_size: int = 100
-    explainer_backend: Literal["template"] = "template"
 
     # alerting / valve safety
     valve_ack_timeout_s: float = Field(60.0, gt=0)
@@ -225,6 +237,8 @@ class Settings(BaseSettings):
 
     def _check_production(self, origins: list[str]) -> None:
         key = self.secret_key
+        if not key:
+            raise ValueError("SECRET_KEY is required in production")
         if key:
             if _is_placeholder(key) or len(key) < MIN_SECRET_LEN:
                 raise ValueError(

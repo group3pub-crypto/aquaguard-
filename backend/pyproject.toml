@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
-  "pydantic>=2.6",
+  "pydantic>=2.7",
   "pydantic-settings>=2.2",
   "sqlalchemy[asyncio]>=2.0.25",
   "asyncpg>=0.29",
@@ -19,7 +19,8 @@ dependencies = [
   "python-jose[cryptography]>=3.3",
   "passlib[bcrypt]>=1.7.4",
   "bcrypt>=4.0.1,<4.1",
-  "slowapi>=0.1.9",
+  "limits>=3.6",
+  "prometheus-client>=0.19",
   "aiomqtt>=2.0",
   "numpy>=1.26",
   "scikit-learn>=1.4",
@@ -30,6 +31,8 @@ dependencies = [
 
 [project.optional-dependencies]
 shap = ["shap>=0.45"]
+llm = ["anthropic>=1.15,<2"]  # optional: LLM_ENABLED alert text
+redis = ["redis>=5"]  # RATE_LIMIT_STORAGE_URI=redis://...
 dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",

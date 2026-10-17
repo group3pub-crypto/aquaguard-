@@ -15,7 +15,6 @@ from app.models import Alert, Flat, FlowReading
 from app.mqtt.topics import ParsedTopic, parse_topic
 from app.repositories import (
     AuditRepository,
-    BaselineRepository,
     FlatRepository,
     ReadingRepository,
     SensorHealthRepository,
@@ -23,12 +22,12 @@ from app.repositories import (
 from app.runtime import Runtime
 from app.schemas.domain import ReadingOut
 from app.schemas.mqtt import MAX_PAYLOAD_BYTES, FlowPayload, HeartbeatPayload, ValveAckPayload
-from app.services import alert_engine, baseline, detector, valve_control
+from app.services import alert_engine, detector, device_status, valve_control
+from app.services.batcher import ReadingBatcher
 
 log = structlog.get_logger(__name__)
 LATE_AFTER = timedelta(minutes=2)
 OFFLINE_AFTER = timedelta(minutes=5)
-EXPECTED_INTERVAL_S = 60.0
 M = TypeVar("M", bound=BaseModel)
 
 
@@ -67,6 +66,11 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
         if len(payload) > MAX_PAYLOAD_BYTES:
             _fail(rt, counter, topic, "oversize_payload")
             return
+        if not _allow(rt, parsed):
+            rt.counters["rate_limited"] += 1
+            if rt.counters["rate_limited"] % 100 == 1:  # keep the dead-letter ring useful
+                rt.dead_letter(topic, "rate_limited")
+            return
         try:
             if parsed.kind == "flow":
                 await handle_flow(rt, parsed, payload)
@@ -81,6 +85,33 @@ async def handle_message(rt: Runtime, topic: str, payload: bytes) -> None:
             _fail(rt, counter, topic, f"error:{type(exc).__name__}")
     except Exception:  # last line of defence for the MQTT loop
         log.exception("ingest_dispatch_failed")
+
+
+def _allow(rt: Runtime, parsed: ParsedTopic) -> bool:
+    """Token bucket per device: refill mqtt_device_rate_per_min/min, burst max(10, rate/4)."""
+    rate = rt.settings.mqtt_device_rate_per_min
+    if rate <= 0:
+        return True
+    key = (parsed.slug, parsed.unit)
+    now = time.monotonic()
+    cap = max(10.0, rate / 4)
+    tokens, last = rt.rate_buckets.get(key, (cap, now))
+    tokens = min(cap, tokens + (now - last) * rate / 60.0)
+    if len(rt.rate_buckets) >= FLAT_CACHE_MAX:
+        rt.rate_buckets.clear()
+    if tokens < 1.0:
+        rt.rate_buckets[key] = (tokens, now)
+        return False
+    rt.rate_buckets[key] = (tokens - 1.0, now)
+    return True
+
+
+def check_reading_age(rt: Runtime, ts: datetime, now: datetime) -> None:
+    """Reject stale readings. (Too-far-future ones are rejected by the payload validator.)"""
+    max_age = rt.settings.mqtt_max_reading_age_s
+    if (now - ts).total_seconds() > max_age:
+        rt.counters["stale_reading"] += 1
+        raise IngestError("stale_reading")
 
 
 def _parse(model: type[M], payload: bytes, max_future_skew_s: float | None = None) -> M:
@@ -121,43 +152,80 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     data = _parse(FlowPayload, payload, rt.settings.mqtt_max_future_skew_s)
     ts = datetime.fromtimestamp(data.ts, UTC)
     now = datetime.now(UTC)
+    check_reading_age(rt, ts, now)
     try:
-        async with rt.db.session() as session:
-            flat_id, society_id = await _flat_ids(rt, session, parsed)
-            reading = FlowReading(
-                flat_id=flat_id,
-                timestamp=ts,
-                flow_rate=data.flow,
-                volume=data.vol,
-                pressure=data.psi,
-                temperature=data.tmp,
-                battery_pct=None if data.bat is None else round(data.bat),
-                rssi=data.rssi,
-                message_id=data.id.lower(),
-                received_at=now,
-            )
-            if not await ReadingRepository(session).add_idempotent(reading):
-                rt.counters["flow_duplicate"] += 1
-                return
-            await SensorHealthRepository(session).upsert(
-                flat_id, last_seen=now, status="online", missed_readings=0
-            )
-            out = ReadingOut.model_validate(reading).model_dump(mode="json")
+        hit = rt.flat_cache.get((parsed.slug, parsed.unit))
+        if hit and hit[2] > time.monotonic():
+            flat_id, society_id = hit[0], hit[1]
+        else:
+            async with rt.db.session() as session:
+                flat_id, society_id = await _flat_ids(rt, session, parsed)
+        values = {
+            "flat_id": flat_id,
+            "timestamp": ts,
+            "flow_rate": data.flow,
+            "volume": data.vol,
+            "pressure": data.psi,
+            "temperature": data.tmp,
+            "battery_pct": None if data.bat is None else round(data.bat),
+            "rssi": data.rssi,
+            "message_id": data.id.lower(),
+            "received_at": now,
+            "total_volume": data.tot,
+            "battery_volts": data.vbat,
+            "device_valve_state": data.valve,
+            "firmware_version": data.fw,
+            "fault_codes": data.err,
+        }
+        if rt.batcher is None:
+            rt.batcher = ReadingBatcher(rt)
+        reading_id = await rt.batcher.add(values)
+        if reading_id is None:
+            rt.counters["flow_duplicate"] += 1
+            return
     except Exception:
         rt.flat_cache.pop((parsed.slug, parsed.unit), None)  # e.g. flat deleted: re-resolve
         raise
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
+    if any(v is not None for v in (data.tot, data.vbat, data.valve, data.fw, data.err, data.bat)):
+        await device_status.apply_report(
+            rt,
+            flat_id,
+            society_id,
+            min(ts, now),
+            fw=data.fw,
+            bat=data.bat,
+            vbat=data.vbat,
+            tot=data.tot,
+            valve=data.valve,
+            err=list(data.err or []),
+        )
+    out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
     await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
-    await maybe_detect(rt, flat_id, ts)
+    # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
+    # future beyond the configured skew, so a stale or forged ts can never move the window
+    horizon = now + timedelta(seconds=rt.settings.mqtt_max_future_skew_s)
+    await maybe_detect(rt, flat_id, max(now, min(ts, horizon)))
 
 
 async def handle_heartbeat(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
-    _parse(HeartbeatPayload, payload)
+    data = _parse(HeartbeatPayload, payload)
+    now = datetime.now(UTC)
     async with rt.db.session() as session:
         flat = await _resolve_flat(session, parsed)
         await SensorHealthRepository(session).upsert(
-            flat.id, last_seen=datetime.now(UTC), status="online", missed_readings=0
+            flat.id, last_seen=now, status="online", missed_readings=0
+        )
+        flat_id, society_id = flat.id, flat.society_id
+    if data.fw is not None or data.bat is not None:
+        await device_status.apply_report(
+            rt,
+            flat_id,
+            society_id,
+            min(datetime.fromtimestamp(data.ts, UTC), now),
+            fw=data.fw,
+            bat=data.bat,
         )
     rt.counters["heartbeat_ok"] += 1
 
@@ -190,7 +258,9 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
             flat = await FlatRepository(session).get(flat_id)
             if flat is None:
                 return None
-            outcome = await detector.run_detection(session, rt.models, flat, now)
+            outcome = await detector.run_detection(
+                session, rt.models, flat, now, policy=rt.settings.detection_policy
+            )
             if outcome is None:
                 return None
             for resolved in outcome.resolved:
@@ -229,55 +299,35 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
         rt.detect_inflight -= 1
 
 
-async def refresh_sensor_health(rt: Runtime, now: datetime) -> int:
-    """Mark sensors late/offline from last_seen. Returns number of status changes."""
-    changed = 0
-    async with rt.db.session() as session:
-        flats = FlatRepository(session)
-        for row in await SensorHealthRepository(session).all():
-            status = sensor_status(row.last_seen, now)
-            row.missed_readings = (
-                int((now - row.last_seen).total_seconds() // EXPECTED_INTERVAL_S)
-                if row.last_seen
-                else 0
-            )
-            if status != row.status:
-                row.status = status
-                changed += 1
-                flat = await flats.get(row.flat_id)
-                if flat:
-                    await rt.ws.broadcast(
-                        {"type": "sensor", "flat_id": str(flat.id), "status": status},
-                        [str(flat.id), str(flat.society_id)],
-                    )
-    return changed
-
-
-async def retrain_baselines(
-    rt: Runtime, now: datetime, max_age: timedelta = timedelta(hours=24)
+async def backfill_readings(
+    session,
+    flat: Flat,
+    rows: list[tuple[datetime, float, float, str]],
+    *,
+    actor: str,
 ) -> int:
-    n = 0
-    async with rt.db.session() as session:
-        for flat in await FlatRepository(session).find(limit=10_000):
-            active = await BaselineRepository(session).active(flat.id)
-            if active and active.trained_to and now - active.trained_to < max_age:
-                continue
-            if await ReadingRepository(session).count(flat.id) < 60:
-                continue
-            await baseline.train_baseline(session, flat, now=now)
-            n += 1
-    return n
-
-
-async def run_maintenance(rt: Runtime, now: datetime | None = None) -> None:
-    """Periodic housekeeping: escalations, valve ack timeouts, sensor health. Never raises."""
-    now = now or datetime.now(UTC)
-    try:
-        async with rt.db.session() as session:
-            await alert_engine.run_escalations(session, rt, now)
-            await valve_control.expire_pending(session, now)
-            for flat in await FlatRepository(session).find(limit=10_000):
-                await baseline.refresh_status(session, flat, now)
-        await refresh_sensor_health(rt, now)
-    except Exception:
-        log.exception("maintenance_failed")
+    """ADMIN-ONLY history import (never reachable from MQTT): store (timestamp, flow_rate,
+    volume, message_id) rows idempotently, skipping the live-ingest age window and detection.
+    The caller must have authorised ``actor`` as an admin. Returns the number of new rows."""
+    repo = ReadingRepository(session)
+    added = 0
+    for ts, flow, vol, mid in rows:
+        reading = FlowReading(
+            flat_id=flat.id,
+            timestamp=ts,
+            flow_rate=flow,
+            volume=vol,
+            message_id=mid.lower(),
+            received_at=datetime.now(UTC),
+        )
+        added += int(await repo.add_idempotent(reading))
+    await AuditRepository(session).record(
+        entity_type="flat",
+        entity_id=flat.id,
+        action="readings_backfilled",
+        actor=actor,
+        details={"rows": len(rows), "added": added},
+        flat_id=flat.id,
+        society_id=flat.society_id,
+    )
+    return added

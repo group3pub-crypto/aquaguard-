@@ -1,0 +1,20 @@
+title = "AquaGuard gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "build output and placeholders"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.next/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)\.git/''',
+  '''package-lock\.json$''',
+  # fixtures with obviously fake credentials (JWT-shaped strings, 'secret' API keys)
+  '''^backend/tests/''',
+]
+regexes = [
+  '''CHANGE_ME[A-Za-z0-9_]*''',
+  '''ci-only[-a-z0-9]*''',
+]

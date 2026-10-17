@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthProvider';
+import { isUnbound } from '@/lib/permissions';
+import { UnboundState } from './States';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -41,9 +43,17 @@ function ThemeToggle() {
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
+  const unbound = isUnbound(user) && !pathname.startsWith('/account');
   const links = [
-    { href: '/', label: 'Overview' },
-    { href: '/alerts', label: 'Alerts' },
+    ...(unbound ? [] : [{ href: '/', label: 'Overview' }, { href: '/alerts', label: 'Alerts' }]),
+    ...(user?.role === 'admin'
+      ? [
+          { href: '/admin/societies', label: 'Societies' },
+          { href: '/admin/flats', label: 'Flats' },
+          { href: '/admin/users', label: 'Users' },
+        ]
+      : []),
+    { href: '/account', label: 'Account' },
   ];
   return (
     <>
@@ -86,9 +96,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <ConnectionBanner />
+      {unbound ? null : <ConnectionBanner />}
       <main id="main" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary>{unbound ? <UnboundState /> : children}</ErrorBoundary>
       </main>
     </>
   );

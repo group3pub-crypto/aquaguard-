@@ -4,6 +4,10 @@
 > errors will not transfer to real sensors; the prediction-interval width in particular must be
 > recalibrated on real residuals.
 
+> **Scope.** This report covers demand forecasting only. Detector claims (and whether the ML
+> detector beats simple rules) are evaluated in [`benchmark.md`](benchmark.md); a sensor-model
+> stress test there shows what an assumed YF-S201 can and cannot see.
+
 - Trained: 2026-10-16T15:57:08+00:00 | seed 42 | model: HistGradientBoostingRegressor
 - Data: 12 flats x 30 days hourly (hash `c0e02c47747fb59e`); target =
   mean flow of the hour in **L/min** (not litres per hour)

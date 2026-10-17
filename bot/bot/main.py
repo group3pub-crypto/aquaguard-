@@ -22,6 +22,7 @@ from bot.handlers import callbacks, commands, queries
 from bot.poller import run_poller
 from bot.ratelimit import RateLimiter
 from bot.tools import build_default_registry
+from bot.tools.alerts import set_warning_seconds
 
 log = logging.getLogger("bot")
 
@@ -38,6 +39,7 @@ def build_app(settings: Settings) -> Application:
         settings.bot_api_password.get_secret_value(),
         timeout=settings.bot_api_timeout,
     )
+    set_warning_seconds(settings.bot_shutoff_warning_seconds)
     deps = Deps(
         api=api,
         registry=build_default_registry(),
@@ -46,6 +48,25 @@ def build_app(settings: Settings) -> Application:
         audit=AuditLog(settings.audit_path),
         confirm=ConfirmStore(),
     )
+
+    if settings.bot_nlu_enabled:
+        from bot.nlu import ChatMemory, NluLimiter, NluRouter, build_client
+
+        client = build_client(settings.nlu_api_key, settings.llm_timeout_s)
+        if client is None:
+            log.warning("BOT_NLU_ENABLED is set but smart mode cannot start (no key or no anthropic package)")
+        deps.nlu = NluRouter(
+            deps.registry,
+            client,
+            deps.audit,
+            model=settings.llm_model,
+            timeout_s=settings.llm_timeout_s,
+            max_rounds=settings.bot_nlu_max_rounds,
+            limiter=NluLimiter(
+                settings.bot_nlu_user_per_min, settings.bot_nlu_user_per_day, settings.bot_nlu_global_per_day
+            ),
+            memory=ChatMemory(),
+        )
 
     async def post_init(app: Application) -> None:
         app.bot_data["poller"] = asyncio.create_task(

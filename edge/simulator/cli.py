@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-device broker accounts: every flat connects as <society>/<unit> with a password "
         "derived from this secret; --username/--password then only serve the control topics",
     )
+    ap.add_argument(
+        "--tls-ca",
+        default=os.environ.get("MQTT_CA_FILE"),
+        help="CA certificate file: connect with TLS (broker port 8883) and verify the server",
+    )
     ap.add_argument("--log-level", default="INFO")
     return ap
 
@@ -69,10 +74,17 @@ async def amain(args: argparse.Namespace) -> None:
             pass
     if args.device_secret:
         await run_mqtt_per_device(
-            sim, host, port, stop, args.device_secret, args.username, args.password
+            sim,
+            host,
+            port,
+            stop,
+            args.device_secret,
+            args.username,
+            args.password,
+            tls_ca=args.tls_ca,
         )
     else:
-        await run_mqtt(sim, host, port, stop, args.username, args.password)
+        await run_mqtt(sim, host, port, stop, args.username, args.password, tls_ca=args.tls_ca)
 
 
 def main(argv: list[str] | None = None) -> int:

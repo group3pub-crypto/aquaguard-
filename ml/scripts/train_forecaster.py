@@ -187,6 +187,10 @@ def write_report(path: Path, meta: dict) -> None:
 > errors will not transfer to real sensors; the prediction-interval width in particular must be
 > recalibrated on real residuals.
 
+> **Scope.** This report covers demand forecasting only. Detector claims (and whether the ML
+> detector beats simple rules) are evaluated in [`benchmark.md`](benchmark.md); a sensor-model
+> stress test there shows what an assumed YF-S201 can and cannot see.
+
 - Trained: {meta["trained_at"]} | seed {meta["seed"]} | model: {meta["model_type"]}
 - Data: {meta["n_flats"]} flats x {meta["days"]} days hourly (hash `{meta["data_hash"]}`); target =
   mean flow of the hour in **L/min** (not litres per hour)

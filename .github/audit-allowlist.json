@@ -1,0 +1,5 @@
+{
+  "_comment": "Accepted dependency advisories. Every entry needs a reason and an expiry (YYYY-MM-DD); expired entries fail the build again. 'npm' ids are GHSA ids (or npm advisory numbers), 'pip' ids are PYSEC/GHSA/CVE ids as printed by pip-audit.",
+  "npm": [],
+  "pip": []
+}

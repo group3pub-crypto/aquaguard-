@@ -7,10 +7,23 @@ export interface LoginRequest {
   username: string;
   password: string;
 }
+/** TokenResponse: login, refresh and change-password all answer with this. */
 export interface LoginResponse {
   access_token: string;
-  token_type: string;
+  refresh_token: string;
+  token_type?: string;
   role: Role;
+  /** Access-token lifetime, seconds (15 min). */
+  expires_in: number;
+  refresh_expires_in: number;
+}
+export type TokenResponse = LoginResponse;
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+export interface WsTicketResponse {
+  ticket: string;
   expires_in: number;
 }
 export interface RegisterRequest {
@@ -25,7 +38,36 @@ export interface User {
   role: Role;
   flat_id?: Id | null;
   society_id?: Id | null;
+  is_active?: boolean;
+  is_service?: boolean;
+  telegram_id?: number | null;
   created_at?: string;
+}
+export interface UserCreate {
+  username: string;
+  password: string;
+  name: string;
+  role: Role;
+  flat_id?: Id | null;
+  society_id?: Id | null;
+}
+export interface UserUpdate {
+  name?: string | null;
+  role?: Role | null;
+  is_active?: boolean | null;
+}
+export interface BindingUpdate {
+  flat_id: Id | null;
+  society_id: Id | null;
+}
+export interface UserQuery {
+  role?: Role;
+  is_active?: boolean;
+  society_id?: Id;
+  flat_id?: Id;
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface Society {
@@ -35,6 +77,15 @@ export interface Society {
   address: string | null;
   total_flats: number;
   created_at: string;
+}
+export interface SocietyCreate {
+  name: string;
+  slug: string;
+  address?: string | null;
+}
+export interface SocietyUpdate {
+  name?: string | null;
+  address?: string | null;
 }
 /** GET /societies/{id}/stats */
 export interface SocietyStats {
@@ -62,11 +113,37 @@ export interface Flat {
   valve_state: string;
   baseline_status: string;
 }
+export interface FlatCreate {
+  society_id: Id;
+  unit_number: string;
+  floor?: number | null;
+  residents?: number;
+  sensor_id?: string | null;
+}
+export interface FlatUpdate {
+  floor?: number | null;
+  residents?: number | null;
+  sensor_id?: string | null;
+}
+/**
+ * Latest device report (firmware status), when the backend exposes it on GET /flats/{id}.
+ * Not in the OpenAPI document yet: every field is optional and the panel hides when absent.
+ * `valve_reported` is what the device says it commanded (there is no position feedback).
+ */
+export interface DeviceInfo {
+  fw?: string | null;
+  vbat?: number | null;
+  tot?: number | null;
+  valve_reported?: string | null;
+  err?: string[] | null;
+  updated_at?: string | null;
+}
 /** GET /flats/{id}. */
 export interface FlatDetail extends Flat {
   current_flow: number | null;
   last_reading_at: string | null;
   sensor_status: SensorStatus;
+  device?: DeviceInfo | null;
 }
 export interface Reading {
   id?: number;
@@ -181,6 +258,10 @@ export interface Alert {
   acknowledged_by?: string | null;
   acknowledged_at?: string | null;
   resolved_at?: string | null;
+  /** Set when the pre-shut-off warning window started (alert is still `ticket`). */
+  shutoff_warned_at?: string | null;
+  /** Set when automatic shut-off was attempted and the device never confirmed. */
+  shutoff_gave_up_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -282,3 +363,8 @@ export type WsMessage =
   | SensorMessage;
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'disconnected';
+/** Why the live feed last closed (WS close code + human text), shown in the banner. */
+export interface ConnectionNotice {
+  code: number;
+  message: string;
+}

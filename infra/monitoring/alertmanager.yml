@@ -1,0 +1,17 @@
+# EXAMPLE - UNTESTED. Replace the receiver with your real channel (e-mail, Slack, PagerDuty,
+# Telegram via webhook). Secrets belong in files mounted into the container, not in this file.
+route:
+  receiver: ops
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="page"']
+      receiver: ops
+      repeat_interval: 1h
+receivers:
+  - name: ops
+    webhook_configs:
+      - url: http://CHANGE_ME-alert-webhook:9000/alert
+        send_resolved: true

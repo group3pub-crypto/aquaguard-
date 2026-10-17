@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
+
+log = structlog.get_logger(__name__)
 
 
 def _harden_sqlite(engine: AsyncEngine) -> None:
@@ -49,6 +52,11 @@ class Database:
             try:
                 yield s
                 await s.commit()
+                for fn in s.info.pop("after_commit", []):  # e.g. LLM text upgrades
+                    try:
+                        fn()
+                    except Exception:  # never fail a committed unit of work
+                        log.exception("after_commit_failed")
             except BaseException:
                 await s.rollback()
                 raise

@@ -1,0 +1,41 @@
+# PROPOSED CI jobs for the firmware. NOT wired into .github/ (owned by another agent): copy the
+# jobs you want into a workflow. The jobs below were NOT run in CI; the host commands were run locally.
+# The compile job needs network access to downloads.arduino.cc and github.com.
+name: firmware (proposed)
+on:
+  pull_request:
+    paths: ["edge/firmware/**", "edge/tests/test_firmware_*.py", "backend/app/schemas/mqtt.py", "docs/hardware/**"]
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y g++ make
+      - run: make -C edge/firmware test
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install pytest pydantic numpy aiomqtt jsonschema
+      - run: python -m pytest -q edge/tests/test_firmware_payload.py   # payloads vs backend schema + simulator
+
+  compile-sketch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2      # verify the pinned action version before use
+      - name: Install core and libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.0.7 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "ArduinoJson@7.2.1"
+          # espMqttClient is not guaranteed to be in the library index in the version used here (the
+          # local compile used upstream main = 1.7.3) and requires AsyncTCP on ESP32:
+          arduino-cli config set library.enable_unsafe_install true
+          arduino-cli lib install --git-url https://github.com/bertmelis/espMqttClient.git
+          arduino-cli lib install --git-url https://github.com/mathieucarbou/AsyncTCP.git
+      - name: Compile with the example config (placeholders => device would refuse to connect)
+        run: |
+          mkdir -p /tmp/sk/aquaguard_sensor
+          cp edge/firmware/aquaguard_sensor/* /tmp/sk/aquaguard_sensor/
+          cp edge/firmware/aquaguard_sensor/config.h.example /tmp/sk/aquaguard_sensor/config.h
+          arduino-cli compile --fqbn esp32:esp32:esp32 --warnings more /tmp/sk/aquaguard_sensor

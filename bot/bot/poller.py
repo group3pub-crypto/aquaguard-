@@ -7,6 +7,11 @@ Policy (backend states in backend/app/models/alerts.py):
 - Dedupe key is `<alert_id>:<state>`, so an escalation (alert -> ticket -> auto_shutoff) is
   pushed again; a key is marked seen only after at least one successful delivery and is
   persisted so a restart does not re-spam.
+- The shut-off protocol is visible on the alert row (the bot has no websocket): a `ticket` with
+  `shutoff_warned_at` is a `shutoff_warning` (countdown; Ack/Override buttons for staff, text
+  only for residents), one with `shutoff_gave_up_at` is `shutoff_failed` (staff only). Keys
+  are `<id>:shutoff_warning:<warned_at>` (a re-armed warning is a new event) and
+  `<id>:shutoff_failed`. Water is only reported shut off for state `auto_shutoff`.
 - Residents only receive alerts of their bound flat; staff receive everything.
 """
 
@@ -21,9 +26,10 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.auth import Principal, Role
 from bot.deps import Deps, send
 from bot.fsutil import atomic_write_json
-from bot.tools.alerts import fmt_alert
+from bot.tools.alerts import fmt_alert, fmt_shutoff_failed, fmt_shutoff_warning
 from bot.tools.scope import can_see_alert
 
 log = logging.getLogger("bot.poller")
@@ -78,8 +84,36 @@ def alert_keyboard(alert_id: str, state: str = "alert") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
+def warning_keyboard(alert_id: str, role: Role) -> InlineKeyboardMarkup | None:
+    """Staff can cancel the pending shut-off: acknowledge (staff) or override (admin only)."""
+    row = [InlineKeyboardButton("Acknowledge (cancel shut-off)", callback_data=f"alert:ack:{alert_id}")]
+    if role >= Role.ADMIN:
+        row.append(InlineKeyboardButton("Override", callback_data=f"alert:override:{alert_id}"))
+    return InlineKeyboardMarkup([row]) if role >= Role.MAINTENANCE else None
+
+
 def _key(a: dict) -> str:
     return f"{a.get('id')}:{a.get('state')}"
+
+
+def _warning_key(a: dict) -> str | None:
+    if (
+        a.get("shutoff_warned_at")
+        and not a.get("shutoff_gave_up_at")
+        and a.get("state") in ("nudge", "alert", "ticket")
+    ):
+        return f"{a.get('id')}:shutoff_warning:{a['shutoff_warned_at']}"
+    return None
+
+
+def _failed_key(a: dict) -> str | None:
+    if a.get("shutoff_gave_up_at") and a.get("state") in ("nudge", "alert", "ticket"):
+        return f"{a.get('id')}:shutoff_failed"
+    return None
+
+
+def event_keys(a: dict) -> list[str]:
+    return [k for k in (_key(a), _warning_key(a), _failed_key(a)) if k]
 
 
 async def _fetch(deps: Deps, states: tuple[str, ...]) -> list[dict]:
@@ -100,26 +134,67 @@ async def _deliver(bot: Any, deps: Deps, chat_id: int, text: str, **kw: Any) -> 
         return False
 
 
+Keyboard = Callable[[Principal], InlineKeyboardMarkup | None]
+
+
+def _const(kb: InlineKeyboardMarkup) -> Keyboard:
+    return lambda _p: kb
+
+
+def _warning_kb(alert_id: str) -> Keyboard:
+    return lambda p: warning_keyboard(alert_id, p.role)
+
+
+async def _push(
+    bot: Any,
+    deps: Deps,
+    seen: SeenStore,
+    key: str,
+    recipients: list[tuple[Principal, int]],
+    a: dict,
+    text: str,
+    keyboard: Keyboard,
+    staff_only: bool = False,
+) -> int:
+    """Deliver one event to everyone who may see it; mark it seen after >= 1 success."""
+    ok = 0
+    for principal, chat_id in recipients:
+        if (staff_only and principal.role < Role.MAINTENANCE) or not can_see_alert(principal, a):
+            continue
+        kb = keyboard(principal)
+        extra = {"reply_markup": kb} if kb is not None else {}
+        if await _deliver(bot, deps, chat_id, text, **extra):
+            ok += 1
+    if ok:
+        seen.add(key)
+    else:
+        log.error("alert event %s not delivered to anyone; will retry", key)
+    return ok
+
+
 async def poll_once(bot: Any, deps: Deps, seen: SeenStore) -> int:
-    """Push new alerts; returns the number of successful deliveries."""
+    """Push new alerts and shut-off warning / failure events; returns successful deliveries."""
     recipients = deps.store.recipients()
     delivered = 0
     for a in await _fetch(deps, PUSH_STATES):
-        key = _key(a)
-        if key in seen:
-            continue
-        text = fmt_alert(a, await deps.api.unit_label(a["flat_id"]))
-        ok = 0
-        for principal, chat_id in recipients:
-            if can_see_alert(principal, a) and await _deliver(
-                bot, deps, chat_id, text, reply_markup=alert_keyboard(str(a["id"]), a["state"])
-            ):
-                ok += 1
-        if ok:
-            seen.add(key)
-            delivered += ok
-        else:
-            log.error("alert %s (%s) not delivered to anyone; will retry", a.get("id"), a.get("state"))
+        aid, state = str(a["id"]), a["state"]
+        unit: str | None = None
+        key, wkey, fkey = _key(a), _warning_key(a), _failed_key(a)
+        if key not in seen:
+            unit = await deps.api.unit_label(a["flat_id"])
+            delivered += await _push(
+                bot, deps, seen, key, recipients, a, fmt_alert(a, unit), _const(alert_keyboard(aid, state))
+            )
+        if wkey and wkey not in seen:
+            unit = unit or await deps.api.unit_label(a["flat_id"])
+            text = fmt_shutoff_warning(a, unit)
+            delivered += await _push(bot, deps, seen, wkey, recipients, a, text, _warning_kb(aid))
+        if fkey and fkey not in seen:
+            unit = unit or await deps.api.unit_label(a["flat_id"])
+            text = fmt_shutoff_failed(a, unit)
+            delivered += await _push(
+                bot, deps, seen, fkey, recipients, a, text, _const(alert_keyboard(aid, "ticket")), staff_only=True
+            )
     delivered += await _digest(bot, deps, seen, recipients)
     seen.save()
     return delivered
@@ -159,7 +234,8 @@ async def run_poller(
         try:
             if first:  # no history: do not replay the existing backlog
                 for a in await _fetch(deps, PUSH_STATES + DIGEST_STATES):
-                    seen.add(_key(a))
+                    for k in event_keys(a):
+                        seen.add(k)
                 seen.save()
                 first = False
             else:

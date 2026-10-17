@@ -6,8 +6,6 @@ import re
 from dataclasses import dataclass
 
 ROOT = "aquaguard"
-CONTROL_FAULT = f"{ROOT}/control/fault"
-CONTROL_SPEED = f"{ROOT}/control/speed"
 SUBSCRIPTIONS = (f"{ROOT}/+/+/flow", f"{ROOT}/+/+/heartbeat", f"{ROOT}/+/+/valve/state")
 _SEGMENT = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 

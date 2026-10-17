@@ -6,7 +6,15 @@
 // at runtime, so one image works behind any domain. Runtime names (no NEXT_PUBLIC_
 // prefix) win; the NEXT_PUBLIC_* names are accepted as a fallback for convenience.
 
-import { DEFAULT_API_URL, DEFAULT_TIMEZONE, deriveWsUrl, type RuntimeConfig } from './config';
+import {
+  DEFAULT_API_URL,
+  DEFAULT_SHUTOFF_WARNING_SECONDS,
+  DEFAULT_TIMEZONE,
+  deriveWsUrl,
+  parseBool,
+  parsePositiveNumber,
+  type RuntimeConfig,
+} from './config';
 
 type Env = Record<string, string | undefined>;
 
@@ -22,7 +30,14 @@ export function readRuntimeConfig(env: Env = process.env as Env): RuntimeConfig 
     get('AQUAGUARD_WS_URL') ?? get('NEXT_PUBLIC_WS_URL') ?? deriveWsUrl(apiUrl),
   );
   const timezone = get('AQUAGUARD_BACKEND_TZ') ?? get('NEXT_PUBLIC_BACKEND_TZ') ?? DEFAULT_TIMEZONE;
-  return { apiUrl, wsUrl, timezone };
+  const allowSelfRegistration = parseBool(
+    get('DASHBOARD_ALLOW_SELF_REGISTRATION') ?? get('ALLOW_SELF_REGISTRATION') ?? get('NEXT_PUBLIC_ALLOW_SELF_REGISTRATION'),
+  );
+  const shutoffWarningSeconds = parsePositiveNumber(
+    get('SHUTOFF_WARNING_SECONDS') ?? get('NEXT_PUBLIC_SHUTOFF_WARNING_SECONDS'),
+    DEFAULT_SHUTOFF_WARNING_SECONDS,
+  );
+  return { apiUrl, wsUrl, timezone, allowSelfRegistration, shutoffWarningSeconds };
 }
 
 /** Builds the CSP for one request. `nonce` authorises Next's own inline scripts. */

@@ -1,0 +1,61 @@
+# Production overlay: TLS reverse proxy + the only host-published ports.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build   (= make up)
+#
+# Published on the host (PUBLIC_BIND_ADDR, default all interfaces):
+#   80/443  Caddy: automatic HTTPS (ACME for a real PUBLIC_DOMAIN, or `tls internal` on a LAN)
+#   8883    Mosquitto TLS listener for the sensors (the plain 1883 listener is never published)
+# Backend, dashboard and Postgres are NOT published: they are reachable only through Caddy.
+services:
+  proxy:
+    image: ${CADDY_IMAGE:-caddy:2.10.0-alpine}
+    restart: unless-stopped
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      # "internal" = Caddy's own local CA (LAN / testing); an e-mail address = ACME (Let's Encrypt)
+      CADDY_TLS: ${CADDY_TLS:-internal}
+    ports:
+      - "${PUBLIC_BIND_ADDR:-0.0.0.0}:80:80"
+      - "${PUBLIC_BIND_ADDR:-0.0.0.0}:443:443"
+      - "${PUBLIC_BIND_ADDR:-0.0.0.0}:443:443/udp"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs: ["/tmp"]
+    read_only: true
+    networks:
+      app:
+        ipv4_address: 172.31.250.2
+    depends_on:
+      backend: {condition: service_healthy}
+      dashboard: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    deploy:
+      resources:
+        limits: {memory: 256m, cpus: "1.0"}
+
+  mosquitto:
+    ports:
+      - "${PUBLIC_BIND_ADDR:-0.0.0.0}:8883:8883"
+    volumes:
+      # ACME certificates issued by Caddy, e.g.
+      #   MQTT_TLS_CERT_FILE=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<domain>/<domain>.crt
+      #   MQTT_TLS_KEY_FILE=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<domain>/<domain>.key
+      - caddy_data:/caddy-data:ro
+
+volumes:
+  caddy_data:
+  caddy_config:

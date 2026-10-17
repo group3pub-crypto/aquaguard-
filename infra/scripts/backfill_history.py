@@ -20,25 +20,18 @@ import os
 import time
 
 import asyncpg
-
 from edge.simulator.profiles import make_profiles
 from edge.simulator.simulator import FlatSimulator
 
 
 async def main() -> None:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
-    )
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--database-url", default=os.environ.get("DATABASE_URL"))
     ap.add_argument("--society", default="green-valley")
     ap.add_argument("--units", default="101,102,201,202,301,302")
     ap.add_argument("--days", type=int, default=15)
-    ap.add_argument(
-        "--seed", type=int, default=42, help="must equal the live simulator's --seed"
-    )
-    ap.add_argument(
-        "--end", type=float, default=None, help="epoch seconds (default: now)"
-    )
+    ap.add_argument("--seed", type=int, default=42, help="must equal the live simulator's --seed")
+    ap.add_argument("--end", type=float, default=None, help="epoch seconds (default: now)")
     args = ap.parse_args()
     if not args.database_url:
         raise SystemExit("set DATABASE_URL or --database-url")

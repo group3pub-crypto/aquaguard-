@@ -90,6 +90,11 @@ class MqttService:
                     # persistent session: the broker queues QoS1 messages while we restart
                     # and redelivers them (possible duplicates are absorbed by message_id)
                     clean_session=False,
+                    tls_params=(
+                        aiomqtt.TLSParameters(ca_certs=str(s.mqtt_ca_file))
+                        if s.mqtt_ca_file
+                        else None
+                    ),
                 )
                 manual_ack = _enable_manual_ack(client)  # before connect: queued msgs
                 async with client:

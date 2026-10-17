@@ -9,7 +9,7 @@ from app.repositories import (
     ReadingRepository,
     SensorHealthRepository,
 )
-from app.services import ingest
+from app.services import ingest, maintenance
 from tests.helpers import TOPIC, flow_msg
 
 HB_TOPIC = "aquaguard/green-valley/101/heartbeat"
@@ -54,7 +54,7 @@ async def test_same_id_for_other_flat_is_not_a_duplicate(rt, db, world):
 
 async def test_out_of_order_messages_are_all_stored(rt, db, world):
     now = time.time()
-    for i, ts in enumerate([now - 10, now - 300, now - 100, now - 600]):
+    for i, ts in enumerate([now - 10, now - 300, now - 100, now - 500]):
         await ingest.handle_message(rt, TOPIC, flow_msg(mid=f"0000000{i}", ts=ts))
     rows = await readings(db, await flat_id(db))
     assert len(rows) == 4
@@ -103,14 +103,16 @@ async def test_unknown_flat_and_bad_topic_dead_lettered(rt, db, world):
 
 
 async def test_dead_letter_queue_is_bounded(rt, world):
+    rt.settings.mqtt_device_rate_per_min = 0  # not under test here
     for i in range(rt.settings.dead_letter_size + 25):
         await ingest.handle_message(rt, TOPIC, b"junk%d" % i)
     assert len(rt.dead_letters) == rt.settings.dead_letter_size
 
 
-async def test_health_endpoint_exposes_dead_letters_without_payloads(client, rt, world):
+async def test_health_details_exposes_dead_letters_without_payloads(client, rt, world):
     await ingest.handle_message(rt, TOPIC, b'{"secret": "payload"}')
-    body = (await client.get("/health")).json()
+    assert (await client.get("/health")).json() == {"status": "ok"}  # public: nothing else
+    body = (await client.get("/health/details", headers=world.admin)).json()
     assert body["db"] == "ok" and body["dead_letters"]["count"] == 1
     assert "secret" not in json.dumps(body)
     assert body["ingest"]["flow_failed"] == 1
@@ -165,7 +167,7 @@ async def test_refresh_sensor_health_marks_offline_and_broadcasts(rt, db, world)
         await SensorHealthRepository(s).upsert(
             fid, last_seen=datetime.now(UTC) - timedelta(minutes=10), status="online"
         )
-    assert await ingest.refresh_sensor_health(rt, datetime.now(UTC)) == 1
+    assert await maintenance.refresh_sensor_health(rt, datetime.now(UTC)) == 1
     async with db.session() as s:
         h = await SensorHealthRepository(s).get_for_flat(fid)
     assert h.status == "offline" and h.missed_readings >= 9
@@ -193,7 +195,7 @@ async def test_flow_triggers_detection_alert_and_ws_broadcast(rt, db, world):
         return 0
 
     rt.ws.broadcast = capture
-    base = datetime.now(UTC).timestamp() - 600
+    base = datetime.now(UTC).timestamp() - 540
     for i in range(12):  # 5.5 min of 30 L/min continuous flow: looks like a burst
         await ingest.handle_message(
             rt, TOPIC, flow_msg(mid=f"{i:08x}", ts=base + i * 30, flow=30.0)
@@ -214,3 +216,53 @@ async def test_fractional_battery_percent_is_accepted(rt, db, world):
     assert rt.counters["flow_ok"] == 1 and rt.counters["flow_failed"] == 0
     rows = await readings(db, await flat_id(db))
     assert rows[0].battery_pct == 100
+
+
+async def test_stale_reading_is_rejected_and_counted(rt, db, world):
+    await ingest.handle_message(rt, TOPIC, flow_msg(ts=time.time() - 3600))
+    assert rt.counters["flow_ok"] == 0 and rt.counters["stale_reading"] == 1
+    assert rt.counters["flow_failed"] == 1
+    assert list(rt.dead_letters)[-1]["reason"] == "stale_reading"
+
+
+async def test_reading_inside_age_window_is_accepted(rt, db, world):
+    await ingest.handle_message(rt, TOPIC, flow_msg(ts=time.time() - 540))
+    assert rt.counters["flow_ok"] == 1
+
+
+async def test_unknown_society_or_unit_is_rejected(rt, db, world):
+    await ingest.handle_message(rt, "aquaguard/nowhere/101/flow", flow_msg())
+    await ingest.handle_message(rt, "aquaguard/green-valley/999/flow", flow_msg())
+    assert rt.counters["flow_ok"] == 0 and rt.counters["flow_failed"] == 2
+
+
+async def test_per_device_rate_limit_isolates_devices(rt, db, world):
+    rt.settings.mqtt_device_rate_per_min = 60  # burst capacity 15
+    for i in range(40):
+        await ingest.handle_message(rt, TOPIC, flow_msg(mid=f"{i:08x}"))
+    assert rt.counters["flow_ok"] == 15 and rt.counters["rate_limited"] == 25
+    # another device is unaffected by 101 being throttled
+    await ingest.handle_message(rt, "aquaguard/green-valley/102/flow", flow_msg(mid="ffffffff"))
+    assert rt.counters["flow_ok"] == 16
+
+
+async def test_backfill_path_accepts_old_rows_without_detection(rt, db, world):
+    from datetime import UTC, datetime, timedelta
+
+    from app.repositories import FlatRepository
+
+    fid = await flat_id(db)
+    old = datetime.now(UTC) - timedelta(days=3)
+    async with db.session() as s:
+        flat = await FlatRepository(s).get(fid)
+        n = await ingest.backfill_readings(
+            s,
+            flat,
+            [(old + timedelta(minutes=i), 1.0, 1.0, f"{i:08x}") for i in range(5)],
+            actor="admin",
+        )
+        again = await ingest.backfill_readings(
+            s, flat, [(old, 1.0, 1.0, "00000000")], actor="admin"
+        )
+    assert n == 5 and again == 0 and len(await readings(db, fid)) == 5
+    assert rt.last_detect == {}

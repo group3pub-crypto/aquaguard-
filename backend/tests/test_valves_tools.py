@@ -1,10 +1,9 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from app.main import create_app
 from app.models import FlowReading
 from app.repositories import AuditRepository
-from tests.conftest import make_alert, make_settings
+from tests.conftest import make_alert
 
 API = "/api/v1"
 
@@ -32,7 +31,7 @@ async def test_open_valve_and_status(client, world, publisher):
     assert (
         await client.post(f"{API}/valves/{fid}/open", json={}, headers=world.admin)
     ).status_code == 200
-    st = (await client.get(f"{API}/valves/{fid}", headers=world.resident)).json()
+    st = (await client.get(f"{API}/valves/{fid}", headers=world.maintenance)).json()
     assert (
         st["valve_state"] == "unknown"
         and len(st["pending"]) == 1
@@ -70,81 +69,6 @@ async def test_pending_valve_commands_time_out(client, world, rt, db):
     assert st["pending"] == [] and st["recent"][0]["status"] == "timeout"
 
 
-# -------------------------------------------------------------------- demo
-async def test_demo_router_not_mounted_when_demo_mode_false(tmp_path, db):
-    import httpx
-    from httpx import ASGITransport
-
-    app = create_app(make_settings(tmp_path, demo_mode=False), db)
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.get(f"{API}/demo/status")).status_code == 404
-        assert (await c.post(f"{API}/demo/set-speed", json={"speed": 2})).status_code == 404
-    assert not any("/demo" in getattr(r, "path", "") for r in app.routes)
-
-
-async def test_demo_fault_lifecycle(client, world, publisher):
-    fid = str(world.flats[0].id)
-    r = await client.post(
-        f"{API}/demo/inject-fault",
-        json={"flat_id": fid, "fault_type": "slow_leak", "params": {"lpm": 0.5}},
-        headers=world.admin,
-    )
-    assert r.status_code == 200 and r.json()["active_faults"] == [
-        {"flat_id": fid, "fault_type": "slow_leak"}
-    ]
-    topic, payload = publisher.sent[-1]
-    assert topic == "aquaguard/control/fault"
-    assert (
-        payload["unit"] == "101"
-        and payload["society"] == "green-valley"
-        and payload["params"] == {"lpm": 0.5}
-    )
-    st = await client.get(f"{API}/demo/status", headers=world.resident)
-    assert (
-        st.json()["active_faults"][0]["fault_type"] == "slow_leak"
-        and st.json()["simulator_running"] is False
-    )
-    cleared = await client.post(
-        f"{API}/demo/clear-fault", json={"flat_id": fid}, headers=world.admin
-    )
-    assert cleared.json()["active_faults"] == [] and publisher.sent[-1][1]["action"] == "clear"
-
-
-async def test_demo_validation(client, world, publisher):
-    fid = str(world.flats[0].id)
-    bad = await client.post(
-        f"{API}/demo/inject-fault",
-        json={"flat_id": fid, "fault_type": "meteor"},
-        headers=world.admin,
-    )
-    assert bad.status_code == 422
-    ghost = await client.post(
-        f"{API}/demo/inject-fault",
-        json={"flat_id": str(uuid.uuid4()), "fault_type": "burst"},
-        headers=world.admin,
-    )
-    assert ghost.status_code == 404 and publisher.sent == []
-    for speed in (0, -1, 100000):
-        assert (
-            await client.post(f"{API}/demo/set-speed", json={"speed": speed}, headers=world.admin)
-        ).status_code == 422
-
-
-async def test_demo_set_speed_publishes_and_reports(client, world, publisher):
-    r = await client.post(f"{API}/demo/set-speed", json={"speed": 60}, headers=world.admin)
-    assert r.json()["speed"] == 60 and publisher.sent[-1] == (
-        "aquaguard/control/speed",
-        {"v": 1, "speed": 60},
-    )
-
-
-async def test_demo_returns_503_when_broker_down(client, world, publisher):
-    publisher.fail = True
-    r = await client.post(f"{API}/demo/set-speed", json={"speed": 5}, headers=world.admin)
-    assert r.status_code == 503 and "broker" in r.json()["detail"]
-    assert (await client.get(f"{API}/demo/status", headers=world.admin)).json()["speed"] == 1.0
-
-
 # -------------------------------------------------------------------- tools, flats, societies
 async def test_tools_active_alerts_and_losses(client, db, rt, world):
     now = datetime.now(UTC)
@@ -158,7 +82,7 @@ async def test_tools_active_alerts_and_losses(client, db, rt, world):
     r = await client.post(
         f"{API}/tools/top-losses",
         json={"society_id": str(world.society.id), "days": 7},
-        headers=world.resident,
+        headers=world.maintenance,
     )
     losses = r.json()["losses"]
     assert losses[0]["unit"] == "101" and losses[0]["estimated_loss_l"] > 0
@@ -186,12 +110,14 @@ async def test_tools_flat_usage_and_weekly_report(client, db, world):
     rep = await client.post(
         f"{API}/tools/weekly-report",
         json={"society_id": str(world.society.id)},
-        headers=world.resident,
+        headers=world.maintenance,
     )
     md = rep.json()["markdown"]
     assert md.startswith("# Weekly water report: Green Valley Apartments") and "10 L" in md
     ghost = await client.post(
-        f"{API}/tools/weekly-report", json={"society_id": str(uuid.uuid4())}, headers=world.resident
+        f"{API}/tools/weekly-report",
+        json={"society_id": str(uuid.uuid4())},
+        headers=world.maintenance,
     )
     assert ghost.status_code == 404
 
@@ -212,8 +138,9 @@ async def test_tool_valve_control_uses_bot_source(client, world, publisher):
 async def test_societies_and_flats_endpoints(client, db, world):
     soc = (await client.get(f"{API}/societies", headers=world.resident)).json()
     assert len(soc) == 1 and soc[0]["slug"] == "green-valley"
+    assert len((await client.get(f"{API}/societies", headers=world.admin)).json()) == 2
     stats = (
-        await client.get(f"{API}/societies/{world.society.id}/stats", headers=world.resident)
+        await client.get(f"{API}/societies/{world.society.id}/stats", headers=world.maintenance)
     ).json()
     assert stats["flats"] == 6 and stats["sensors_offline"] == 6 and stats["active_alerts"] == 0
     assert (
@@ -221,12 +148,12 @@ async def test_societies_and_flats_endpoints(client, db, world):
     ).status_code == 404
     flats = (
         await client.get(
-            f"{API}/flats?society_id={world.society.id}&limit=4", headers=world.resident
+            f"{API}/flats?society_id={world.society.id}&limit=4", headers=world.maintenance
         )
     ).json()
     assert len(flats) == 4
     assert (
-        await client.get(f"{API}/flats?society_id={uuid.uuid4()}", headers=world.resident)
+        await client.get(f"{API}/flats?society_id={uuid.uuid4()}", headers=world.maintenance)
     ).json() == []
 
 

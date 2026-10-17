@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from app.models import Anomaly
+from app.models import Anomaly, Flat
 from app.repositories.base import BaseRepository
 from app.scope import Scope
 
@@ -64,6 +64,20 @@ class AnomalyRepository(BaseRepository[Anomaly]):
             select(Anomaly)
             .where(
                 Anomaly.flat_id.in_(flat_ids),
+                Anomaly.detected_at >= start,
+                Anomaly.detected_at <= end,
+            )
+            .order_by(Anomaly.detected_at)
+        )
+
+    async def between_society(
+        self, society_id: uuid.UUID, start: datetime, end: datetime
+    ) -> list[Anomaly]:
+        return await self._all(
+            select(Anomaly)
+            .join(Flat, Flat.id == Anomaly.flat_id)
+            .where(
+                Flat.society_id == society_id,
                 Anomaly.detected_at >= start,
                 Anomaly.detected_at <= end,
             )

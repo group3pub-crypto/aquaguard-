@@ -1,0 +1,7 @@
+# Replace @your-org/... with real teams before enabling "Require review from Code Owners".
+*                       @your-org/maintainers
+/backend/               @your-org/backend
+/dashboard/             @your-org/frontend
+/ml/ /libs/             @your-org/ml
+/infra/ /docker-compose*.yml /Makefile /.github/ /.env.example  @your-org/platform
+/SECURITY.md /docs/security.md @your-org/security

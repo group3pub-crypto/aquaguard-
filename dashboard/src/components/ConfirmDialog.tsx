@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
 export interface ConfirmDialogProps {
   title: string;
@@ -10,6 +11,9 @@ export interface ConfirmDialogProps {
   reasonLabel?: string;
   reasonRequired?: boolean;
   busy?: boolean;
+  /** Extra controls (e.g. a select) rendered under the description. */
+  children?: ReactNode;
+  confirmDisabled?: boolean;
   error?: string | null;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
@@ -48,7 +52,7 @@ export function ConfirmDialog(p: ConfirmDialogProps) {
     }
   };
 
-  const disabled = p.busy || (p.reasonLabel && p.reasonRequired ? reason.trim().length === 0 : false);
+  const disabled = p.busy || p.confirmDisabled || (p.reasonLabel && p.reasonRequired ? reason.trim().length === 0 : false);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-4">
@@ -67,6 +71,7 @@ export function ConfirmDialog(p: ConfirmDialogProps) {
         <p id={descId} className="mt-2 text-sm text-ink-2">
           {p.description}
         </p>
+        {p.children ? <div className="mt-4">{p.children}</div> : null}
         {p.reasonLabel ? (
           <div className="mt-4">
             <label className="label" htmlFor={`${titleId}-reason`}>

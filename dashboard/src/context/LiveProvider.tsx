@@ -2,11 +2,14 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { parseWsMessage } from '@/lib/guards';
+import { refreshSession } from '@/lib/api';
+import { isUnbound } from '@/lib/permissions';
 import { buildWsUrl } from '@/lib/wsAuth';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type {
   Alert,
   AnomalyMessage,
+  ConnectionNotice,
   ConnectionState,
   SensorStatusName,
   ValveCommandRecord,
@@ -27,6 +30,8 @@ export interface LiveEvent {
 
 export interface LiveValue {
   connection: ConnectionState;
+  /** Why the feed last closed (forbidden / capped / idle / expired), if applicable. */
+  notice: ConnectionNotice | null;
   readings: Record<string, LiveReading[]>;
   valves: Record<string, ValveState>;
   /** Latest valve command per flat (from {type:'valve',event:'command'}). */
@@ -44,6 +49,7 @@ const MAX_EVENTS = 100;
 
 const defaultValue: LiveValue = {
   connection: 'idle',
+  notice: null,
   readings: {},
   valves: {},
   valveCommands: {},
@@ -63,7 +69,7 @@ export function useLive(): LiveValue {
 let eventSeq = 0;
 
 export function LiveProvider({ children }: { children: ReactNode }) {
-  const { token, expireSession } = useAuth();
+  const { status: authStatus, user, expireSession } = useAuth();
   const [readings, setReadings] = useState<Record<string, LiveReading[]>>({});
   const [valves, setValves] = useState<Record<string, ValveState>>({});
   const [valveCommands, setValveCommands] = useState<Record<string, ValveCommandRecord>>({});
@@ -125,12 +131,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [pushEvent],
   );
 
-  const url = buildWsUrl(token);
-  const { state, reconnect } = useWebSocket({ url, onMessage, onUnauthorized: expireSession });
+  const { state, notice, reconnect } = useWebSocket({
+    // Unbound accounts have no data scope (the server would close with 4403): don't connect.
+    getUrl: authStatus === 'authenticated' && !isUnbound(user) ? buildWsUrl : null,
+    onMessage,
+    onAuthExpired: refreshSession,
+    onUnauthorized: expireSession,
+  });
 
   const value = useMemo<LiveValue>(
     () => ({
       connection: state,
+      notice,
       readings,
       valves,
       valveCommands,
@@ -141,7 +153,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       reconnect,
       log: (text: string) => pushEvent('info', text),
     }),
-    [state, readings, valves, valveCommands, sensors, lastAlert, lastAnomaly, events, reconnect, pushEvent],
+    [state, notice, readings, valves, valveCommands, sensors, lastAlert, lastAnomaly, events, reconnect, pushEvent],
   );
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

@@ -22,6 +22,11 @@ from app.repositories import (
 from tests.conftest import T0, make_settings
 
 BACKEND = __import__("pathlib").Path(__file__).resolve().parents[1]
+PROD = dict(
+    database_url="postgresql+asyncpg://aq:Xk29fj3Lq8vZ1mQp@db.internal:5432/aq",
+    allowed_origins="https://dash.example.org",
+    secret_key="Q7vLx2NmRt9WcKd4Hs6Bj3YfGp8ZaE5u",
+)
 
 
 async def test_security_headers_present(client):
@@ -35,6 +40,21 @@ async def test_security_headers_present(client):
 async def test_request_id_is_propagated(client):
     r = await client.get("/health", headers={"X-Request-ID": "trace-123"})
     assert r.headers["x-request-id"] == "trace-123"
+
+
+@pytest.mark.parametrize(
+    "bad", ["x" * 65, "has space", "line\\nbreak", "semi;colon", "<script>", "a/b", "é"]
+)
+async def test_hostile_request_id_is_replaced(client, bad):
+    r = await client.get("/health", headers={"X-Request-ID": bad.encode("utf-8", "ignore")})
+    assert re.fullmatch(r"[0-9a-f]{32}", r.headers["x-request-id"])
+
+
+async def test_request_id_of_64_valid_chars_is_kept(client):
+    rid = "a-Z_0.9" * 9 + "x"  # 64 chars
+    assert len(rid) == 64
+    r = await client.get("/health", headers={"X-Request-ID": rid})
+    assert r.headers["x-request-id"] == rid
 
 
 def test_unhandled_exception_returns_generic_500(tmp_path):
@@ -68,7 +88,7 @@ async def test_ready_returns_503_when_db_down(client, db):
     db.ping = lambda: _false()  # type: ignore[method-assign]
     assert (await client.get("/health/ready")).status_code == 503
     body = (await client.get("/health")).json()
-    assert body["status"] == "degraded" and body["db"] == "down"
+    assert body == {"status": "degraded"}  # the public endpoint discloses nothing else
 
 
 async def _false():
@@ -76,9 +96,15 @@ async def _false():
 
 
 async def test_docs_hidden_in_production(tmp_path):
-    s = make_settings(tmp_path, environment="production", demo_mode=False)
+    s = make_settings(tmp_path, environment="production", **PROD)
     app = create_app(s, Database("sqlite+aiosqlite://"))
-    assert app.openapi_url is None and app.docs_url is None
+    assert app.openapi_url is None and app.docs_url is None and app.redoc_url is None
+
+
+async def test_docs_can_be_enabled_explicitly(tmp_path):
+    s = make_settings(tmp_path, environment="production", enable_docs=True, **PROD)
+    app = create_app(s, Database("sqlite+aiosqlite://"))
+    assert app.openapi_url == "/openapi.json" and app.docs_url == "/docs"
 
 
 # ------------------------------------------------------------------ repositories

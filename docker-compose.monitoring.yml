@@ -1,0 +1,56 @@
+# OPTIONAL monitoring stack - UNTESTED (no Docker daemon was available when written).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d
+#
+# Requires METRICS_ENABLED=true and METRICS_TOKEN (>= 24 chars) in .env. Prometheus and
+# Alertmanager are published on loopback only; put them behind your own authenticated access
+# (SSH tunnel / VPN) - they have no authentication of their own.
+services:
+  backend:
+    environment:
+      METRICS_ENABLED: "true"
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle=false
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    secrets: [metrics_token]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [app]
+    depends_on: [backend]
+    deploy:
+      resources:
+        limits: {memory: 512m, cpus: "1.0"}
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.27.0}
+    restart: unless-stopped
+    ports: ["127.0.0.1:9093:9093"]
+    volumes:
+      - ./infra/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [app]
+    deploy:
+      resources:
+        limits: {memory: 128m, cpus: "0.5"}
+
+secrets:
+  metrics_token:
+    environment: METRICS_TOKEN
+
+volumes:
+  prometheus_data:
+  alertmanager_data:

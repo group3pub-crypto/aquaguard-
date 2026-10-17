@@ -19,9 +19,9 @@ from sqlalchemy import text
 from alembic import command
 from app.database import Database
 from app.main import create_app
+from app.models import Society
 from app.rate_limit import limiter
-from app.seed import seed_demo
-from tests.conftest import FakePublisher, make_settings
+from tests.conftest import FakePublisher, add_society, make_settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DB_URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -85,6 +85,7 @@ async def pgdb(migrated) -> AsyncIterator[Database]:
 def make_app(pgdb, tmp_path) -> Callable:
     def _make(**kw):
         limiter.reset()
+        kw.setdefault("mqtt_device_rate_per_min", 0)  # rate limiting has its own unit tests
         app = create_app(make_settings(tmp_path, database_url=DB_URL, **kw), pgdb)
         app.state.rt.publisher = FakePublisher()
         return app
@@ -97,7 +98,11 @@ def rt(make_app):
     return make_app().state.rt
 
 
+UNITS = ("101", "102", "201", "202", "301", "302")
+
+
 @pytest.fixture
-async def society(pgdb, rt):
-    async with pgdb.session() as s:
-        return await seed_demo(s, rt.settings)
+async def society(pgdb) -> Society:
+    """Society 'green-valley' with six flats (baseline ready, auto shut-off commissioned)."""
+    soc, _ = await add_society(pgdb, "green-valley", "Green Valley", list(UNITS))
+    return soc

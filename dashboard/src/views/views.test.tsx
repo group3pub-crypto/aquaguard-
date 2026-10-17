@@ -111,17 +111,18 @@ describe('OverviewView', () => {
     expect(await screen.findByText('No flats yet')).toBeInTheDocument();
   });
 
-  it('shows an empty state when there are no societies', async () => {
+  it('shows an empty state when there is nothing in scope', async () => {
     mockFetch(() => ({ body: [] }));
     render(<WithAuth role="resident"><OverviewView /></WithAuth>);
-    expect(await screen.findByText('No societies found')).toBeInTheDocument();
+    // a resident may have no society row but still gets their own flat list: both empty => no flats
+    expect(await screen.findByText('No flats yet')).toBeInTheDocument();
   });
 
   it('shows an error state with retry when societies fail', async () => {
     mockFetch(() => ({ status: 500, body: { detail: 'nope' } }));
     render(<WithAuth role="resident"><OverviewView /></WithAuth>);
-    expect(await screen.findByText('nope')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect((await screen.findAllByText('nope')).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Retry' })[0]).toBeInTheDocument();
   });
 });
 
@@ -151,5 +152,50 @@ describe('FlatView', () => {
     mockFetch(() => ({ status: 403, body: { detail: 'Insufficient permissions' } }));
     render(<WithAuth role="resident"><FlatView flatId={fx.IDS.flat} /></WithAuth>);
     expect((await screen.findAllByText(/you don.t have permission/i)).length).toBeGreaterThan(0);
+  });
+
+  it('shows "Not found" for an out-of-scope flat (404) instead of an error', async () => {
+    mockFetch(() => ({ status: 404, body: { detail: 'Not found' } }));
+    render(<WithAuth role="resident"><FlatView flatId={fx.IDS.flat2} /></WithAuth>);
+    expect((await screen.findAllByText('Not found')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  const flatRoutes = (detail: unknown) => (url: URL) => {
+    const p = url.pathname;
+    if (p.endsWith('/anomalies') || p.endsWith('/alerts') || p.endsWith('/readings')) return { body: [] };
+    if (p.endsWith('/baseline')) return { body: fx.baseline };
+    if (p.endsWith('/forecast')) return { body: fx.forecast };
+    if (p.includes('/flats/')) return { body: detail };
+    return undefined;
+  };
+
+  it('renders device status with human labels and a prominent close_unconf warning', async () => {
+    mockFetch(
+      flatRoutes({
+        ...fx.flatDetail,
+        device: { fw: '2.0.0', vbat: 3.91, tot: 98765.4, valve_reported: 'closed', err: ['close_unconf', 'bat_low'] },
+      }),
+    );
+    render(<WithAuth role="admin"><FlatView flatId={fx.IDS.flat} /></WithAuth>);
+    const warning = await screen.findByText(/Valve close not confirmed by flow stop — check manually/);
+    expect(warning.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByText('Battery low')).toBeInTheDocument();
+    expect(screen.getByText('2.0.0')).toBeInTheDocument();
+    expect(screen.getByText('3.91 V')).toBeInTheDocument();
+  });
+
+  it('hides the device panel when the backend sends no device info', async () => {
+    mockFetch(flatRoutes(fx.flatDetail));
+    render(<WithAuth role="admin"><FlatView flatId={fx.IDS.flat} /></WithAuth>);
+    await screen.findByText('Flat A-301');
+    expect(screen.queryByRole('heading', { name: 'Device' })).not.toBeInTheDocument();
+  });
+
+  it('shows no close_unconf warning when the device reports no errors', async () => {
+    mockFetch(flatRoutes({ ...fx.flatDetail, device: { fw: '2.0.0', err: [] } }));
+    render(<WithAuth role="admin"><FlatView flatId={fx.IDS.flat} /></WithAuth>);
+    expect(await screen.findByText('No errors reported.')).toBeInTheDocument();
+    expect(screen.queryByText(/not confirmed by flow stop/)).not.toBeInTheDocument();
   });
 });

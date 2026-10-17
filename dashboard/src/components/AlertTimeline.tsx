@@ -1,4 +1,4 @@
-import { alertStateLabel, alertStateTone, byNewest, describeSource, fmtTime } from '@/lib/format';
+import { alertStateLabel, alertStateTone, byNewest, describeSource, fmtTime, safeAlertMessage } from '@/lib/format';
 import type { Alert } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
 
@@ -15,7 +15,7 @@ export function AlertTimeline({ alerts }: { alerts: Alert[] }) {
               {fmtTime(a.created_at)}
             </time>
           </div>
-          <p className="mt-1 text-sm">{a.message ?? 'No message provided.'}</p>
+          <p className="mt-1 text-sm">{safeAlertMessage(a)}</p>
           <p className="text-xs text-ink-2">{describeSource(a.message_source)}</p>
         </li>
       ))}

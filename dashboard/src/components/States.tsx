@@ -5,6 +5,34 @@ export function isForbidden(e: Error | null | undefined): boolean {
   return e instanceof ApiError && e.status === 403;
 }
 
+export function isNotFound(e: Error | null | undefined): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
+/** Out-of-scope ids answer 404; we do not reveal whether the thing exists. */
+export function NotFoundState({ what = 'item' }: { what?: string }) {
+  return (
+    <div role="status" className="rounded-lg border border-dashed border-line bg-panel p-8 text-center">
+      <p className="font-semibold">Not found</p>
+      <p className="mt-1 text-sm text-ink-2">
+        This {what} does not exist or is not available to your account.
+      </p>
+    </div>
+  );
+}
+
+/** Shown to residents without a flat (and staff without a society): the API returns nothing for them. */
+export function UnboundState() {
+  return (
+    <div role="status" className="mx-auto max-w-xl rounded-lg border border-line bg-panel p-8 text-center">
+      <h1 className="text-2xl font-semibold">Your account is not linked to a home yet — contact your administrator</h1>
+      <p className="mt-2 text-ink-2">
+        Contact your administrator to have it linked. Once that is done you will see your water usage and alerts here.
+      </p>
+    </div>
+  );
+}
+
 export function PermissionState({ what }: { what?: string }) {
   return (
     <div role="alert" className="rounded-lg border border-line bg-panel p-6">
@@ -83,6 +111,7 @@ export function DataState<T>({
 }) {
   if (data === null && loading) return <LoadingState label={loadingLabel} />;
   if (data === null && isForbidden(error)) return <PermissionState />;
+  if (data === null && isNotFound(error)) return <NotFoundState />;
   if (data === null && error) return <ErrorState message={error.message} onRetry={onRetry} />;
   if (data === null) return <LoadingState label={loadingLabel} />;
   if (isEmpty ? isEmpty(data) : Array.isArray(data) && data.length === 0) {

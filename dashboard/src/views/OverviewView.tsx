@@ -5,7 +5,8 @@ import { fmtNumber } from '@/lib/format';
 import { useLive } from '@/context/LiveProvider';
 import { useAlerts } from '@/hooks/useAlerts';
 import { usePolling } from '@/hooks/usePolling';
-import { DataState } from '@/components/States';
+import { DataState, ErrorState, isForbidden, isNotFound } from '@/components/States';
+import { useAuth } from '@/context/AuthProvider';
 import { FlatTile } from '@/components/FlatTile';
 import type { Society, SocietyStats } from '@/lib/types';
 
@@ -31,6 +32,7 @@ function StatBand({ stats }: { stats: SocietyStats }) {
 }
 
 export function OverviewView() {
+  const { user } = useAuth();
   const societies = usePolling<Society[]>((signal) => api.societies({ signal }), { key: 'societies' });
   const [selected, setSelected] = useState<string | null>(null);
   const list = Array.isArray(societies.data) ? societies.data : [];
@@ -42,10 +44,10 @@ export function OverviewView() {
     intervalMs: 30_000,
     enabled: !!sid,
   });
-  const flats = usePolling((signal) => api.flats(sid, { signal }), {
+  // Residents only receive their own flat (and possibly no society): list flats regardless.
+  const flats = usePolling((signal) => api.flats(sid || undefined, { signal }), {
     key: `flats:${sid}`,
     intervalMs: 30_000,
-    enabled: !!sid,
   });
   const active = useAlerts({ open: true });
   const { readings, sensors, events } = useLive();
@@ -74,69 +76,63 @@ export function OverviewView() {
         ) : null}
       </div>
 
-      <DataState
-        data={societies.data}
-        loading={societies.loading}
-        error={societies.error}
-        onRetry={societies.refetch}
-        emptyTitle="No societies found"
-        emptyHint="Ask an administrator to create a society."
-        loadingLabel="Loading societies"
-      >
-        {() => (
-          <>
-            <section aria-label="Society statistics">
-              <DataState
-                data={stats.data}
-                loading={stats.loading}
-                error={stats.error}
-                onRetry={stats.refetch}
-                isEmpty={() => false}
-                emptyTitle="No statistics"
-                loadingLabel="Loading statistics"
-              >
-                {(s) => <StatBand stats={s} />}
-              </DataState>
-            </section>
-            <section aria-labelledby="flats-h">
-              <h2 id="flats-h" className="mb-4 text-xl font-semibold">
-                Flats
-              </h2>
-              <DataState
-                data={flats.data}
-                loading={flats.loading}
-                error={flats.error}
-                onRetry={flats.refetch}
-                emptyTitle="No flats yet"
-                emptyHint="Flats appear here once sensors are registered."
-                loadingLabel="Loading flats"
-              >
-                {(fs) => (
-                  <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {fs.map((f) => (
-                      <FlatTile key={String(f.id)} flat={f} live={readings[String(f.id)]} hasAlert={alerted.has(String(f.id))} sensor={sensors[String(f.id)]} />
-                    ))}
-                  </ul>
-                )}
-              </DataState>
-            </section>
-            <section aria-labelledby="live-h">
-              <h2 id="live-h" className="mb-4 text-xl font-semibold">
-                Live activity
-              </h2>
-              {events.length === 0 ? (
-                <p className="text-sm text-ink-2">Alerts, anomalies and valve changes appear here in real time.</p>
-              ) : (
-                <ul className="space-y-1 text-sm">
-                  {events.slice(0, 10).map((e) => (
-                    <li key={e.id}>{e.text}</li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
+      {societies.error && !societies.data && !isForbidden(societies.error) && !isNotFound(societies.error) ? (
+        <ErrorState message={societies.error.message} onRetry={societies.refetch} />
+      ) : null}
+      {list.length === 0 && !societies.loading && user?.role === 'admin' ? (
+        <p className="text-sm text-ink-2">No societies yet. Create one under Societies in the admin menu.</p>
+      ) : null}
+      {sid && !(isForbidden(stats.error) || isNotFound(stats.error)) ? (
+        <section aria-label="Society statistics">
+          <DataState
+            data={stats.data}
+            loading={stats.loading}
+            error={stats.error}
+            onRetry={stats.refetch}
+            isEmpty={() => false}
+            emptyTitle="No statistics"
+            loadingLabel="Loading statistics"
+          >
+            {(s) => <StatBand stats={s} />}
+          </DataState>
+        </section>
+      ) : null}
+      <section aria-labelledby="flats-h">
+        <h2 id="flats-h" className="mb-4 text-xl font-semibold">
+          Flats
+        </h2>
+        <DataState
+          data={flats.data}
+          loading={flats.loading}
+          error={flats.error}
+          onRetry={flats.refetch}
+          emptyTitle="No flats yet"
+          emptyHint="Flats appear here once sensors are registered."
+          loadingLabel="Loading flats"
+        >
+          {(fs) => (
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {fs.map((f) => (
+                <FlatTile key={String(f.id)} flat={f} live={readings[String(f.id)]} hasAlert={alerted.has(String(f.id))} sensor={sensors[String(f.id)]} />
+              ))}
+            </ul>
+          )}
+        </DataState>
+      </section>
+      <section aria-labelledby="live-h">
+        <h2 id="live-h" className="mb-4 text-xl font-semibold">
+          Live activity
+        </h2>
+        {events.length === 0 ? (
+          <p className="text-sm text-ink-2">Alerts, anomalies and valve changes appear here in real time.</p>
+        ) : (
+          <ul className="space-y-1 text-sm">
+            {events.slice(0, 10).map((e) => (
+              <li key={e.id}>{e.text}</li>
+            ))}
+          </ul>
         )}
-      </DataState>
+      </section>
     </div>
   );
 }

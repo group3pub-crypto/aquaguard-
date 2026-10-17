@@ -6,9 +6,10 @@ import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Society
+from app.models import Flat, Society
 from app.repositories import (
     AlertRepository,
     AnomalyRepository,
@@ -44,9 +45,10 @@ async def flat_usage(session: AsyncSession, flat_id: uuid.UUID, hours: int, now:
 async def top_losses(
     session: AsyncSession, society_id: uuid.UUID, days: int, limit: int, now: datetime
 ) -> list[dict]:
-    flats = {f.id: f for f in await FlatRepository(session).find(society_id=society_id, limit=1000)}
-    anomalies = await AnomalyRepository(session).between(
-        list(flats), now - timedelta(days=days), now
+    """Estimated litres lost per flat; anomalies are read by society (one query), only the
+    top `limit` flats are then looked up for their unit number."""
+    anomalies = await AnomalyRepository(session).between_society(
+        society_id, now - timedelta(days=days), now
     )
     totals: dict[uuid.UUID, float] = {}
     for a in anomalies:
@@ -54,8 +56,17 @@ async def top_losses(
         minutes = max((end - a.detected_at).total_seconds() / 60, 15.0)
         totals[a.flat_id] = totals.get(a.flat_id, 0.0) + (a.est_loss_lpm or 0.0) * minutes
     ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    units = dict(
+        (
+            await session.execute(
+                select(Flat.id, Flat.unit_number).where(Flat.id.in_([f for f, _ in ranked]))
+            )
+        )
+        .tuples()
+        .all()
+    )
     return [
-        {"flat_id": str(fid), "unit": flats[fid].unit_number, "estimated_loss_l": round(v, 1)}
+        {"flat_id": str(fid), "unit": units.get(fid, "?"), "estimated_loss_l": round(v, 1)}
         for fid, v in ranked
     ]
 
@@ -65,14 +76,14 @@ async def weekly_report(
 ) -> str:
     now = now or datetime.now(UTC)
     week_start, prev_start = now - timedelta(days=7), now - timedelta(days=14)
-    flat_ids = await FlatRepository(session).ids_for_society(society.id)
+    flats = await FlatRepository(session).count_for_society(society.id)
     readings = ReadingRepository(session)
-    this_week = sum((await readings.volume_sum(flat_ids, week_start, now)).values())
-    last_week = sum((await readings.volume_sum(flat_ids, prev_start, week_start)).values())
-    anomalies = await AnomalyRepository(session).between(flat_ids, week_start, now)
+    this_week = await readings.volume_sum_society(society.id, week_start, now)
+    last_week = await readings.volume_sum_society(society.id, prev_start, week_start)
+    anomalies = await AnomalyRepository(session).between_society(society.id, week_start, now)
     by_type = Counter(a.anomaly_type for a in anomalies)
-    alerts = await AlertRepository(session).count_between(flat_ids, week_start, now)
-    valves = await ValveRepository(session).count_between(flat_ids, week_start, now)
+    alerts = await AlertRepository(session).count_between_society(society.id, week_start, now)
+    valves = await ValveRepository(session).count_between_society(society.id, week_start, now)
     losses = await top_losses(session, society.id, 7, 5, now)
     change = "n/a" if last_week <= 0 else f"{(this_week - last_week) / last_week * 100:+.1f}%"
     lines = [
@@ -80,7 +91,7 @@ async def weekly_report(
         f"_{week_start:%Y-%m-%d} to {now:%Y-%m-%d}_",
         "",
         "## Summary",
-        f"- Flats monitored: {len(flat_ids)}",
+        f"- Flats monitored: {flats}",
         f"- Total consumption: {this_week:,.0f} L ({change} vs previous week)",
         f"- Anomalies detected: {len(anomalies)}",
         f"- Alerts raised: {alerts}",

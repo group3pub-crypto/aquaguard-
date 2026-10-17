@@ -1,11 +1,12 @@
 """Roles and the telegram-user <-> backend-account link store.
 
-Admins come only from TELEGRAM_ADMIN_IDS. Anyone else sends `/link <backend_username>`;
-an admin approves with `/approve <request_id> <flat_unit>` (resident bound to that flat) or
-`/approve <request_id> maintenance` (staff, all flats, no valve). Role escalation to admin
-is impossible through the bot. The binding {telegram_id -> username, role, flat} is what the
-bot uses to scope data: the bot's backend account is an admin/staff service account, so
-scoping of residents is enforced here, not by the backend.
+Admins come only from TELEGRAM_ADMIN_IDS. Anyone else sends `/link <backend_username>`; the bot
+first verifies that username against the backend (`GET /users/by-username/{u}`) and takes the
+role and flat binding from that backend record. A bot admin then approves with
+`/approve <request_id>`. Role escalation to admin is impossible through the bot. The binding
+{telegram_id -> username, backend user id, role, flat} is what the bot uses to scope data: the
+bot's backend account is a service account with staff rights, so scoping of residents is
+enforced here too (defence in depth), not only by the backend.
 """
 
 from __future__ import annotations
@@ -72,8 +73,13 @@ class Principal:
 
     @property
     def actor(self) -> str:
-        """String stored as `issued_by` in the backend / in the bot audit log."""
+        """String used in the bot-side audit log (includes the claimed backend username)."""
         return f"telegram:{self.telegram_id}" + (f"/{self.username}" if self.username else "")
+
+    @property
+    def on_behalf_of(self) -> str:
+        """Value sent as `on_behalf_of` to the backend (asserted there, never verified)."""
+        return f"telegram:{self.telegram_id}"
 
 
 class LinkStore:
@@ -155,11 +161,27 @@ class LinkStore:
             raise RateLimited("too many link requests, try later")
         q.append(now)
 
-    def request_link(self, telegram_id: int, chat_id: int, username: str) -> str:
-        """Register a pending request naming a backend username; returns the request id."""
+    def check_rate(self, telegram_id: int) -> None:
+        """Count one link attempt (call before any backend lookup to bound username probing)."""
+        self._check_rate(telegram_id)
+
+    def request_link(
+        self,
+        telegram_id: int,
+        chat_id: int,
+        username: str,
+        backend: dict[str, Any] | None = None,
+        *,
+        rate_checked: bool = False,
+    ) -> str:
+        """Register a pending request naming a backend username; returns the request id.
+
+        `backend` is the verified backend record (user_id, role, flat_id, society_id).
+        """
         if not USERNAME_RE.match(username):
             raise InvalidUsername("invalid username")
-        self._check_rate(telegram_id)
+        if not rate_checked:
+            self._check_rate(telegram_id)
         self._purge_pending()
         for rid in [r for r, v in self.pending.items() if v["telegram_id"] == telegram_id]:
             del self.pending[rid]  # one open request per user
@@ -170,9 +192,14 @@ class LinkStore:
             "telegram_id": telegram_id,
             "chat_id": chat_id,
             "username": username,
+            "backend": dict(backend) if backend else None,
             "expires": self._clock() + PENDING_TTL,
         }
         return rid
+
+    def get_pending(self, request_id: str) -> dict[str, Any] | None:
+        self._purge_pending()
+        return self.pending.get(request_id)
 
     def _require_admin(self, approver_id: int) -> None:
         if approver_id not in self.admin_ids:
@@ -186,6 +213,8 @@ class LinkStore:
         role: Role,
         flat_id: str | None = None,
         unit: str | None = None,
+        user_id: str | None = None,
+        society_id: str | None = None,
     ) -> dict[str, Any]:
         """Bind the requester. Residents need a flat; maintenance never has one; no admins."""
         self._require_admin(approver_id)
@@ -208,6 +237,8 @@ class LinkStore:
             "role": "maintenance" if role == Role.MAINTENANCE else "resident",
             "flat_id": flat_id if role == Role.RESIDENT else None,
             "unit": unit if role == Role.RESIDENT else None,
+            "user_id": user_id,
+            "society_id": society_id,
         }
         self.links[req["telegram_id"]] = entry
         self._save()

@@ -109,6 +109,8 @@ class Alert(TimestampMixin, Base):
     # the moment we gave up after a failed close + one retry
     shutoff_warned_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     shutoff_gave_up_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # set once when an automatic close would have run but the flat is not commissioned for it
+    shutoff_uncommissioned_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class ValveCommand(Base):

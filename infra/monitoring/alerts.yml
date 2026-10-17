@@ -1,0 +1,67 @@
+# EXAMPLE alert rules - UNTESTED against a live Prometheus (validate with `promtool check rules`).
+# Metric names come from backend/app/metrics.py: ingest_messages_total{result}, mqtt_connected,
+# ws_connections, maintenance_leader, alerts_total{tier}, detection_seconds_bucket.
+# Ingest result labels: flow_ok, flow_duplicate, heartbeat_ok, valve_ack_ok, stale_reading,
+# rate_limited, detect_run, detect_shed (+ failure counters, see backend/app/services/ingest.py).
+groups:
+  - name: aquaguard
+    rules:
+      - alert: AquaGuardBackendDown
+        expr: up{job="aquaguard-backend"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Backend metrics endpoint is not scrapable"
+          description: "Backend down, METRICS_ENABLED off or METRICS_TOKEN mismatch."
+
+      - alert: AquaGuardMqttDisconnected
+        expr: mqtt_connected == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Backend lost its MQTT broker connection; no readings are ingested"
+
+      - alert: AquaGuardNoReadings
+        expr: sum(rate(ingest_messages_total{result="flow_ok"}[10m])) == 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "No flow readings accepted for 15 minutes"
+          description: "All sensors offline, broker down, or readings rejected (clock skew/ACL)."
+
+      - alert: AquaGuardReadingsRejected
+        expr: |
+          sum(rate(ingest_messages_total{result=~"stale_reading|rate_limited"}[10m]))
+            / clamp_min(sum(rate(ingest_messages_total[10m])), 0.001) > 0.2
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 20% of MQTT messages are stale or rate limited"
+
+      - alert: AquaGuardDetectionOverloaded
+        expr: sum(rate(ingest_messages_total{result="detect_shed"}[10m])) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Anomaly detection is shedding load (DETECT_MAX_CONCURRENCY reached)"
+
+      - alert: AquaGuardDetectionSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(detection_seconds_bucket[10m]))) > 1
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 detection pass exceeds 1 s"
+
+      - alert: AquaGuardNoMaintenanceLeader
+        expr: sum(maintenance_leader) == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "No backend instance runs the maintenance loop (retention, escalation, valve timeouts)"
+
+      - alert: AquaGuardTier4Alerts
+        expr: increase(alerts_total{tier="4"}[15m]) > 0
+        labels: {severity: page}
+        annotations:
+          summary: "A tier-4 (critical) water alert was raised"

@@ -27,33 +27,9 @@ class ToolValveRequest(BaseModel):
     flat_id: UUID
     action: Literal["open", "close"]
     reason: str | None = Field(None, max_length=500)
-    issued_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = Field(None, max_length=100)  # service accounts only
+    issued_by: str | None = Field(None, max_length=100, deprecated=True)  # ignored
 
 
 class WeeklyReportRequest(BaseModel):
     society_id: UUID
-
-
-class FaultRequest(BaseModel):
-    flat_id: UUID
-    fault_type: Literal["slow_leak", "burst", "running_toilet", "dripping_tap", "overuse"]
-    params: dict | None = None
-
-
-class ClearFaultRequest(BaseModel):
-    flat_id: UUID
-
-
-class SpeedRequest(BaseModel):
-    speed: float = Field(gt=0, le=3600)
-
-
-class ActiveFault(BaseModel):
-    flat_id: UUID
-    fault_type: str
-
-
-class DemoStatus(BaseModel):
-    active_faults: list[ActiveFault]
-    speed: float
-    simulator_running: bool

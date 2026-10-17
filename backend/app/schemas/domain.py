@@ -41,12 +41,49 @@ class FlatOut(ORM):
     sensor_id: str
     valve_state: str
     baseline_status: str
+    auto_shutoff_validated: bool = Field(
+        False, description="Automatic (tier 4) valve closure is commissioned for this flat"
+    )
+    auto_shutoff_validated_at: datetime | None = None
+
+
+class DeviceStatusOut(ORM):
+    """Latest values reported by the device firmware (staff only)."""
+
+    firmware_version: str | None = None
+    battery_pct: float | None = None
+    battery_volts: float | None = None
+    total_volume: float | None = None
+    valve_reported: Literal["open", "closed"] | None = None
+    err_codes: list[str] = Field(default_factory=list)
+    reported_at: datetime | None = None
 
 
 class FlatDetail(FlatOut):
     current_flow: float | None = None
     last_reading_at: datetime | None = None
     sensor_status: SensorStatus
+    # staff only (null for residents)
+    device: DeviceStatusOut | None = None
+    auto_shutoff_validated_by: str | None = None
+    auto_shutoff_notes: str | None = None
+
+
+class DeviceHealth(BaseModel):
+    flat_id: UUID
+    unit_number: str
+    sensor_status: SensorStatus
+    device: DeviceStatusOut | None = None
+
+
+class AutoShutoffValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    validated: bool = Field(True, description="false revokes the commissioning")
+    note: str = Field(
+        min_length=3,
+        max_length=1000,
+        description="What was tested on site (valve, wiring, close/open cycle, who was present)",
+    )
 
 
 class ReadingOut(ORM):
@@ -59,6 +96,11 @@ class ReadingOut(ORM):
     temperature: float | None = None
     battery_pct: int | None = None
     rssi: int | None = None
+    total_volume: float | None = None
+    battery_volts: float | None = None
+    device_valve_state: str | None = None
+    firmware_version: str | None = None
+    fault_codes: list[str] | None = None
 
 
 class BaselineOut(ORM):
@@ -117,35 +159,74 @@ class AlertOut(ORM):
     acknowledged_by: str | None = None
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
+    shutoff_warned_at: datetime | None = None
+    shutoff_gave_up_at: datetime | None = None
+    shutoff_uncommissioned_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
+class AssertedActor(BaseModel):
+    """Echo of an `on_behalf_of` assertion by a SERVICE account: recorded, never verified."""
+
+    on_behalf_of: str | None = Field(
+        None, description="Asserted by a service account; NOT verified by the backend"
+    )
+    on_behalf_of_verified: bool | None = Field(
+        None, description="Always false when on_behalf_of is set"
+    )
+
+
+class AlertActionOut(AlertOut, AssertedActor):
+    pass
+
+
+OnBehalfOf = Field(
+    None,
+    max_length=100,
+    description="Service accounts only: end user the action is performed for. Recorded in the "
+    "audit trail as asserted, not verified. Other callers get 422.",
+)
+
+
 class AcknowledgeRequest(BaseModel):
+    on_behalf_of: str | None = OnBehalfOf
     acknowledged_by: str | None = Field(
-        None, max_length=100, description="Ignored; actor is the caller"
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
     )
 
 
 class SnoozeRequest(BaseModel):
     duration_minutes: Literal[15, 30, 60, 120]
-    snoozed_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    snoozed_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class OverrideRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
-    overridden_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    overridden_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ResolveRequest(BaseModel):
-    resolved_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    resolved_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ValveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal["manual_dashboard", "manual_bot", "manual_override"] = "manual_dashboard"
-    issued_by: str | None = Field(None, max_length=100)
     reason: str | None = Field(None, max_length=500)
+    on_behalf_of: str | None = OnBehalfOf
+    issued_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ValveCommandOut(ORM):
@@ -165,3 +246,7 @@ class ValveStatus(BaseModel):
     valve_state: str
     pending: list[ValveCommandOut]
     recent: list[ValveCommandOut]
+
+
+class ValveCommandActionOut(ValveCommandOut, AssertedActor):
+    pass
