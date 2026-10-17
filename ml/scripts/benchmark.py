@@ -873,6 +873,33 @@ def _compare_table(rows: list[dict]) -> str:
     return "\n".join(out)
 
 
+def _headline_table(results: dict) -> str:
+    """Compact answer to 'does ML beat the baseline?' for the three headline metrics."""
+    out = [
+        "| condition | model | compared with | leak+burst episode detection | false alarms / flat-week | macro-F1 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for cname, res in results.items():
+        if cname not in (COND_DEFAULT.name, COND_BOTH.name):
+            continue
+        for key, comp in (
+            ("compare", "best simple baseline per metric"),
+            ("compare_best", f"best overall: {POLICY_DESC[res['best_overall']]}"),
+            ("compare_rules", "production rules (a)"),
+        ):
+            for c in ("rf", "hybrid_gate"):
+                cells = []
+                for m, d in (("lb_detect", 3), ("fa_week", 2), ("macro_f1", 3)):
+                    r = next((x for x in res[key][c] if x["metric"] == m), None)
+                    cells.append(
+                        "n/a"
+                        if r is None
+                        else f"{_f(r['model'], d)} vs {_f(r['base'], d)}: **{r['verdict']}**"
+                    )
+                out.append(f"| {cname} | {POLICY_DESC[c]} | {comp} | " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
 def verdict_lines(res: dict, name: str, key: str = "compare") -> str:
     lines = []
     for c in [*CONTENDERS, "hybrid_union"]:
@@ -957,6 +984,12 @@ def write_report(path: Path, ctx: dict) -> None:
         "bootstrap difference is significant after Holm correction across the metrics (adjusted p < 0.05); "
         "otherwise the result is **not demonstrated**. The 'best simple baseline' is picked per metric "
         "among (a)-(d) using the TEST point estimate, which favours the baseline (conservative for ML).",
+        "",
+        "Headline (point values; verdict is 'better'/'worse' only after Holm correction, else 'not demonstrated'):",
+        "",
+        _headline_table(ctx["results"]),
+        "",
+        "Full per-metric verdicts:",
         "",
         "**Versus the best simple baseline, picked per metric** (an oracle: the best of (a)-(d) on each metric "
         "separately, e.g. `night_min_flow` rules win false alarms only by almost never alerting):",

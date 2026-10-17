@@ -1,0 +1,12 @@
+# OPTIONAL and UNTESTED here (no TimescaleDB binaries or Docker daemon were available when this
+# was written). Swaps the Postgres image for TimescaleDB (still PostgreSQL 16).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.timescale.yml up -d
+#
+# Then, after `db-migrate` ran, apply infra/postgres/timescale.sql ONCE as the superuser.
+# READ THE WARNING IN THAT FILE FIRST: converting flow_readings to a hypertable replaces the
+# (flat_id, message_id) unique constraint, which the backend's de-duplication relies on.
+# Pin by digest before use (`make pin-digests`).
+services:
+  postgres:
+    image: ${TIMESCALE_IMAGE:-timescale/timescaledb:2.17.2-pg16}

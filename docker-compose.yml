@@ -1,43 +1,129 @@
-# AquaGuard stack. Requires a .env file (run `make env`).
+# AquaGuard - production base stack.
+#
+#   make up        = docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#   make dev-up    = docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# This file is secure-by-default and is meant to be combined with ONE of the overlays above (it
+# publishes nothing on the host by itself). There is no override file that Compose would pick up
+# silently: every non-production setting lives in docker-compose.dev.yml and needs an explicit -f.
+#
+# Requires a .env file (run `make env`; docs/deployment.md lists every variable).
 name: aquaguard
 
-x-hardening: &hardening
-  security_opt: ["no-new-privileges:true"]
+x-common: &common
   restart: unless-stopped
+  init: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
 
 services:
+  # --------------------------------------------------------------------------- database
   postgres:
-    <<: *hardening
-    image: postgres:16
+    <<: *common
+    image: ${POSTGRES_IMAGE:-postgres:16.6-bookworm}
+    # tuned for the 1 GiB limit below; raise shared_buffers (~25% of RAM) with the limit
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=640MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - wal_compression=on
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+      - -c
+      - idle_in_transaction_session_timeout=120000
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aquaguard}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-aquaguard}
+      # bootstrap superuser: used by backups' restore/maintenance only, never by the application
+      POSTGRES_USER: aquaguard_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (make env)}
+      POSTGRES_DB: aquaguard
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      # least-privilege roles created by infra/postgres/init.sql on first initialisation
+      DB_OWNER_USER: aquaguard_owner
+      DB_OWNER_PASSWORD: ${DB_OWNER_PASSWORD:?set DB_OWNER_PASSWORD in .env (make env)}
+      DB_APP_USER: aquaguard_app
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?set DB_APP_PASSWORD in .env (make env)}
+      DB_BACKUP_USER: aquaguard_backup
+      DB_BACKUP_PASSWORD: ${DB_BACKUP_PASSWORD:?set DB_BACKUP_PASSWORD in .env (make env)}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./infra/postgres/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+      - ./infra/postgres/init.sql:/etc/aquaguard/init.sql:ro
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+    read_only: true
+    # the stock entrypoint starts as root, fixes ownership of the data dir, then drops to postgres
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    shm_size: 256m
+    stop_grace_period: 60s
+    networks: [data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -q -U aquaguard_admin -d aquaguard"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 20s
     deploy:
       resources:
-        limits: {memory: 1g}
+        limits: {memory: 1g, cpus: "2.0"}
+        reservations: {memory: 256m}
 
+  # One-shot: schema migrations run as the table OWNER role, never as the runtime role.
+  db-migrate:
+    <<: *common
+    restart: "no"
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/backend:${AQUAGUARD_TAG:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    entrypoint: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aquaguard_owner:${DB_OWNER_PASSWORD:?set DB_OWNER_PASSWORD in .env}@postgres:5432/aquaguard
+    read_only: true
+    tmpfs: ["/tmp"]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 512m, cpus: "1.0"}
+
+  # --------------------------------------------------------------------------- broker
   mosquitto:
-    <<: *hardening
-    image: eclipse-mosquitto:2
+    <<: *common
+    image: ${MOSQUITTO_IMAGE:-eclipse-mosquitto:2.0.20}
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env (make env)}
       MQTT_DEVICES: ${MQTT_DEVICES:-}
       MQTT_DEVICE_SECRET: ${MQTT_DEVICE_SECRET:-}
-      MQTT_CONTROL_USERNAME: ${MQTT_CONTROL_USERNAME:-}
-      MQTT_CONTROL_PASSWORD: ${MQTT_CONTROL_PASSWORD:-}
-      # plain listener is only reachable on the private compose network (the host port below is
-      # loopback-only); devices must use the TLS listener
+      # the plain listener is only reachable on the private compose network (nothing publishes
+      # it in production); devices must use the TLS listener on 8883
       MQTT_LISTEN_ADDR: 0.0.0.0
       MQTT_TLS_CERT_FILE: ${MQTT_TLS_CERT_FILE:-}
       MQTT_TLS_KEY_FILE: ${MQTT_TLS_KEY_FILE:-}
@@ -45,122 +131,209 @@ services:
     volumes:
       - ./infra/mosquitto:/mosquitto/config:ro
       - ./infra/mosquitto/entrypoint.sh:/entrypoint.sh:ro
-      # TLS material (e.g. from infra/scripts/gen-dev-certs.sh .dev-certs, or your real CA);
-      # set MQTT_TLS_CERT_FILE=/mosquitto/certs/server.crt etc. to enable port 8883
+      # operator-provided TLS material (private CA, or certificates copied from your CA)
       - ${MQTT_TLS_DIR:-./.dev-certs}:/mosquitto/certs:ro
       - mosquitto_data:/mosquitto/data
     tmpfs: ["/tmp"]
     read_only: true
-    ports:
-      - "127.0.0.1:1883:1883"
-      - "${MQTT_TLS_BIND:-127.0.0.1}:8883:8883"
+    # root only to render config and chown, then mosquitto drops to its own user;
+    # DAC_READ_SEARCH lets the entrypoint read keys written by another uid (Caddy-issued certs)
+    cap_add: [CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    networks: [app]
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -h localhost -u \"$${MQTT_USERNAME}\" -P \"$${MQTT_PASSWORD}\" -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
     deploy:
       resources:
-        limits: {memory: 256m}
+        limits: {memory: 256m, cpus: "1.0"}
 
+  # --------------------------------------------------------------------------- ML models
+  # Trained at image-build time (ml/Dockerfile.models) on SYNTHETIC data; copied into the
+  # `models` volume, which the backend mounts read-only. Re-run on every upgrade.
+  models-init:
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/models:${AQUAGUARD_TAG:-local}
+    build:
+      context: .
+      dockerfile: ml/Dockerfile.models
+      additional_contexts:
+        backend: service:backend
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - models:/target
+    deploy:
+      resources:
+        limits: {memory: 64m}
+
+  # --------------------------------------------------------------------------- application
   backend:
-    <<: *hardening
-    build: ./backend
+    <<: *common
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/backend:${AQUAGUARD_TAG:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aquaguard}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-aquaguard}
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (make env)}
+      # runtime role: DML only. Migrations are applied by `db-migrate` (owner role).
+      DATABASE_URL: postgresql+asyncpg://aquaguard_app:${DB_APP_PASSWORD:?set DB_APP_PASSWORD in .env}@postgres:5432/aquaguard
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
-      DEMO_MODE: ${DEMO_MODE:-false}
-      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-}
-      DEMO_RESIDENT_PASSWORD: ${DEMO_RESIDENT_PASSWORD:-}
-      MODEL_DIR: /app/ml/models
-      # the accelerated demo simulator (--speed 60) stamps readings ahead of wall clock
-      MQTT_MAX_FUTURE_SKEW_S: ${MQTT_MAX_FUTURE_SKEW_S:-300}
-      BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
-      WATSONX_API_KEY: ${WATSONX_API_KEY:-}
-      WATSONX_PROJECT_ID: ${WATSONX_PROJECT_ID:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env (make env)}
+      ALLOWED_ORIGINS: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      # trust X-Forwarded-* ONLY from the reverse proxy (fixed address on the `app` network)
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.31.250.2}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
+      MODEL_DIR: /models
+      MODEL_MANIFEST_REQUIRED: "true"
+      METRICS_ENABLED: ${METRICS_ENABLED:-false}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      RATE_LIMIT_STORAGE_URI: ${RATE_LIMIT_STORAGE_URI:-memory://}
+      READINGS_RETENTION_DAYS: ${READINGS_RETENTION_DAYS:-90}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-0}
+      SHUTOFF_WARNING_SECONDS: ${SHUTOFF_WARNING_SECONDS:-300}
+      VALVE_ACK_TIMEOUT_S: ${VALVE_ACK_TIMEOUT_S:-60}
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-haiku-5-5}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-4}
+      LLM_DAILY_BUDGET: ${LLM_DAILY_BUDGET:-500}
     volumes:
-      - ./ml/models:/app/ml/models:ro
+      - models:/models:ro
     tmpfs: ["/tmp"]
     read_only: true
-    ports: ["127.0.0.1:8000:8000"]
+    stop_grace_period: 45s
+    networks: [data, app]
     depends_on:
       postgres: {condition: service_healthy}
+      db-migrate: {condition: service_completed_successfully}
       mosquitto: {condition: service_healthy}
+      models-init: {condition: service_completed_successfully}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
-      interval: 10s
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
       timeout: 5s
-      retries: 12
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits: {memory: 1g, cpus: "2.0"}
+        reservations: {memory: 256m}
+
+  dashboard:
+    <<: *common
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/dashboard:${AQUAGUARD_TAG:-local}
+    build:
+      context: ./dashboard
+    environment:
+      # runtime configuration (no build args): what the BROWSER uses to reach the API
+      AQUAGUARD_API_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
+      AQUAGUARD_WS_URL: wss://${PUBLIC_DOMAIN}
+      AQUAGUARD_BACKEND_TZ: ${TIMEZONE:-UTC}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:rw,noexec,nosuid,size=64m,uid=1001,gid=1001
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:3000/login"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
       start_period: 20s
     deploy:
       resources:
-        limits: {memory: 1g}
-
-  dashboard:
-    <<: *hardening
-    build:
-      context: ./dashboard
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
-    ports: ["127.0.0.1:3000:3000"]
-    depends_on:
-      backend: {condition: service_healthy}
-    deploy:
-      resources:
-        limits: {memory: 512m}
-
-  simulator:
-    <<: *hardening
-    profiles: ["demo"]
-    build:
-      context: .
-      dockerfile: edge/Dockerfile
-    command: ["python", "-m", "edge.simulator", "--society", "green-valley", "--units", "101,102,201,202,301,302", "--speed", "60", "--broker", "mosquitto:1883"]
-    environment:
-      MQTT_USERNAME: ${MQTT_USERNAME:-aquaguard}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:?set MQTT_PASSWORD in .env}
-    read_only: true
-    tmpfs: ["/tmp"]
-    depends_on:
-      mosquitto: {condition: service_healthy}
-      backend: {condition: service_healthy}
-    deploy:
-      resources:
-        limits: {memory: 256m}
+        limits: {memory: 512m, cpus: "1.0"}
 
   bot:
-    <<: *hardening
+    <<: *common
     profiles: ["bot"]
-    build: ./bot
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/bot:${AQUAGUARD_TAG:-local}
+    build:
+      context: ./bot
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:-}
       BOT_API_BASE_URL: http://backend:8000
       BOT_API_USERNAME: ${BOT_API_USERNAME:-bot_service}
-      BOT_API_PASSWORD: ${BOT_API_PASSWORD:?set BOT_API_PASSWORD in .env}
+      BOT_API_PASSWORD: ${BOT_API_PASSWORD:-}
       BOT_STATE_FILE: /state/links.json
+      BOT_NLU_ENABLED: ${BOT_NLU_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-haiku-5-5}
+      # the bot allows up to 60 s, the backend only <= 4 s: they cannot share one variable
+      LLM_TIMEOUT_S: ${BOT_LLM_TIMEOUT_S:-15}
     volumes:
       - bot_state:/state
     read_only: true
     tmpfs: ["/tmp"]
+    networks: [app]
     depends_on:
       backend: {condition: service_healthy}
+    healthcheck:
+      # the bot has no listening port; this only proves PID 1 is the bot process
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'bot.main' in open('/proc/1/cmdline','rb').read() else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
-        limits: {memory: 256m}
+        limits: {memory: 256m, cpus: "0.5"}
+
+  # --------------------------------------------------------------------------- backups
+  # Nightly encrypted pg_dump (custom format) + retention. Enable with --profile backup
+  # (make backup-up). The private age key is NOT on this host: only the public recipient is.
+  backup:
+    <<: *common
+    profiles: ["backup"]
+    image: ${AQUAGUARD_REGISTRY:-aquaguard}/backup:${AQUAGUARD_TAG:-local}
+    build:
+      context: ./infra/backup
+    environment:
+      PGHOST: postgres
+      PGDATABASE: aquaguard
+      PGUSER: aquaguard_backup
+      PGPASSWORD: ${DB_BACKUP_PASSWORD:?set DB_BACKUP_PASSWORD in .env}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-2}
+    volumes:
+      - backups:/backups
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=2g,uid=10002,gid=10002"]
+    read_only: true
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 256m, cpus: "1.0"}
+
+networks:
+  # internal: no route to the outside; only the backend, migrations and backups can reach the DB
+  data:
+    internal: true
+  # fixed subnet so the reverse proxy has a stable address (FORWARDED_ALLOW_IPS)
+  app:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
 
 volumes:
   pgdata:
   mosquitto_data:
+  models:
   bot_state:
+  backups:

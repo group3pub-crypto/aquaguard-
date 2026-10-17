@@ -1,0 +1,76 @@
+# AquaGuard reverse proxy (production). Rendered with the environment of the `proxy` service:
+#   PUBLIC_DOMAIN  host name served (and the ACME identifier)
+#   CADDY_TLS      "internal"  -> Caddy's local CA (LAN/testing; clients must trust its root)
+#                  an e-mail   -> ACME / Let's Encrypt with automatic renewal (needs ports 80+443
+#                                 reachable from the internet and DNS pointing at this host)
+#
+# Routing:  /api/*  -> backend:8000 (REST + WebSocket upgrade on /api/v1/ws/live)
+#           else    -> dashboard:3000
+# /health, /metrics and the API docs are NOT routed: Prometheus scrapes backend:8000/metrics on
+# the private network (docker-compose.monitoring.yml).
+{
+	# admin API stays on the container loopback (used by the compose healthcheck only)
+	admin 127.0.0.1:2019
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+		protocols h1 h2 h3
+	}
+}
+
+{$PUBLIC_DOMAIN} {
+	tls {$CADDY_TLS:internal}
+
+	encode zstd gzip
+
+	# JSON access log. Credentials never reach it: Caddy redacts Authorization/Cookie headers by
+	# default and the one-time WebSocket ticket in the query string is replaced here.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace ticket REDACTED
+					replace token REDACTED
+				}
+			}
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# defaults only: the dashboard sets its own (nonce-based) CSP and frame headers
+		?Referrer-Policy "strict-origin-when-cross-origin"
+		?X-Frame-Options "DENY"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# request size limit (readings arrive over MQTT, not HTTP; no upload endpoints exist)
+	request_body {
+		max_size 1MB
+	}
+
+	handle /api/* {
+		header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		reverse_proxy backend:8000 {
+			# WebSocket upgrades are proxied transparently; close idle sockets promptly on reload
+			stream_close_delay 5s
+			health_uri /health/ready
+			health_interval 15s
+			health_timeout 3s
+		}
+	}
+
+	handle {
+		reverse_proxy dashboard:3000 {
+			health_uri /login
+			health_interval 15s
+			health_timeout 3s
+		}
+	}
+}

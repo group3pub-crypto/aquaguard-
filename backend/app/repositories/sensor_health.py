@@ -82,11 +82,14 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
             age_s = (
                 func.julianday(literal(now, UTCDateTime)) - func.julianday(SensorHealth.last_seen)
             ) * 86400
-        await self.session.execute(
+        missed = func.cast(func.floor(age_s / EXPECTED_INTERVAL_S + 1e-6), Integer)
+        await self.session.execute(  # only rows whose counter actually moves are written
             update(SensorHealth)
-            .where(SensorHealth.last_seen.is_not(None), SensorHealth.status != "online")
-            .values(
-                missed_readings=func.cast(func.floor(age_s / EXPECTED_INTERVAL_S + 1e-6), Integer)
+            .where(
+                SensorHealth.last_seen.is_not(None),
+                SensorHealth.status != "online",
+                SensorHealth.missed_readings != missed,
             )
+            .values(missed_readings=missed)
         )
         return changed

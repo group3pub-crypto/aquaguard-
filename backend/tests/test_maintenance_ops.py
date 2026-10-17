@@ -525,6 +525,7 @@ def test_postgres_retention_statement_uses_ctid_batches():
     inner = select(ctid).select_from(table).where(FlowReading.timestamp < T0).limit(5000)
     sql = str(delete(FlowReading).where(ctid.in_(inner)).compile(dialect=postgresql.dialect()))
     assert "flow_readings.ctid IN (SELECT flow_readings.ctid" in sql and "LIMIT" in sql
+    assert "FROM flow_readings" in sql.split(" IN (")[1]  # sub-select keeps its own FROM
 
 
 @pytest.mark.parametrize(
