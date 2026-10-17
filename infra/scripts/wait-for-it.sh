@@ -5,6 +5,7 @@ host="$1"; port="$2"; timeout="${3:-60}"
 shift 2; [ $# -gt 0 ] && shift
 [ "${1:-}" = "--" ] && shift
 i=0
+# shellcheck disable=SC3025  # /dev/tcp works in bash/busybox ash; nc is the fallback
 until (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null || nc -z "$host" "$port" 2>/dev/null; do
   i=$((i + 1))
   [ "$i" -ge "$timeout" ] && { echo "timeout waiting for $host:$port" >&2; exit 1; }

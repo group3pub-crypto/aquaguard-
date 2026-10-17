@@ -94,7 +94,7 @@ class ReadingBatcher:
     async def _write(self, batch: list[_Item]) -> list[int | None]:
         """Insert in one transaction; returns per item the new id or None for duplicates."""
         async with self.rt.db.session() as session:
-            if session.bind.dialect.name != "postgresql":
+            if session.get_bind().dialect.name != "postgresql":
                 repo, out = ReadingRepository(session), []
                 for it in batch:
                     reading = FlowReading(**it.values)

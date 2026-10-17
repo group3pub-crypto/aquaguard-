@@ -24,7 +24,7 @@ from app.routers import alerts, anomalies, auth, flats, health, societies, tools
 from app.runtime import NullPublisher, Runtime
 from app.services import baseline, ingest, maintenance, retention
 from app.services.detector import ModelStore
-from app.services.explainer import get_explainer
+from app.services.llm import get_explainer
 from app.ws import ConnectionManager
 
 log = structlog.get_logger(__name__)
@@ -46,7 +46,7 @@ def create_app(settings: Settings | None = None, db: Database | None = None) -> 
         ws=ConnectionManager(settings.ws_max_connections, settings.ws_max_per_user),
         publisher=NullPublisher(),
         models=ModelStore(settings.model_dir, manifest_required=settings.manifest_required),
-        explainer=get_explainer(settings),
+        explainer=get_explainer(),  # LLM_* env; TemplateExplainer unless LLM_ENABLED
         dead_letters=deque(maxlen=settings.dead_letter_size),
     )
     metrics.bind(rt)

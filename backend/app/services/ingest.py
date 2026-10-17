@@ -15,7 +15,6 @@ from app.models import Alert, Flat, FlowReading
 from app.mqtt.topics import ParsedTopic, parse_topic
 from app.repositories import (
     AuditRepository,
-    BaselineRepository,
     FlatRepository,
     ReadingRepository,
     SensorHealthRepository,
@@ -23,7 +22,7 @@ from app.repositories import (
 from app.runtime import Runtime
 from app.schemas.domain import ReadingOut
 from app.schemas.mqtt import MAX_PAYLOAD_BYTES, FlowPayload, HeartbeatPayload, ValveAckPayload
-from app.services import alert_engine, baseline, detector, valve_control
+from app.services import alert_engine, detector, valve_control
 from app.services.batcher import ReadingBatcher
 
 log = structlog.get_logger(__name__)
@@ -193,8 +192,7 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
     await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
     # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
-    # future beyond the configured skew (accelerated demo simulator), so a stale or forged ts
-    # can never move the detection window
+    # future beyond the configured skew, so a stale or forged ts can never move the window
     horizon = now + timedelta(seconds=rt.settings.mqtt_max_future_skew_s)
     await maybe_detect(rt, flat_id, max(now, min(ts, horizon)))
 
@@ -274,60 +272,6 @@ async def maybe_detect(rt: Runtime, flat_id, now: datetime) -> Alert | None:
         return None
     finally:
         rt.detect_inflight -= 1
-
-
-async def refresh_sensor_health(rt: Runtime, now: datetime) -> int:
-    """Mark sensors late/offline from last_seen. Returns number of status changes."""
-    changed = 0
-    async with rt.db.session() as session:
-        flats = FlatRepository(session)
-        for row in await SensorHealthRepository(session).all():
-            status = sensor_status(row.last_seen, now)
-            row.missed_readings = (
-                int((now - row.last_seen).total_seconds() // EXPECTED_INTERVAL_S)
-                if row.last_seen
-                else 0
-            )
-            if status != row.status:
-                row.status = status
-                changed += 1
-                flat = await flats.get(row.flat_id)
-                if flat:
-                    await rt.ws.broadcast(
-                        {"type": "sensor", "flat_id": str(flat.id), "status": status},
-                        [str(flat.id), str(flat.society_id)],
-                    )
-    return changed
-
-
-async def retrain_baselines(
-    rt: Runtime, now: datetime, max_age: timedelta = timedelta(hours=24)
-) -> int:
-    n = 0
-    async with rt.db.session() as session:
-        for flat in await FlatRepository(session).find(limit=10_000):
-            active = await BaselineRepository(session).active(flat.id)
-            if active and active.trained_to and now - active.trained_to < max_age:
-                continue
-            if await ReadingRepository(session).count(flat.id) < 60:
-                continue
-            await baseline.train_baseline(session, flat, now=now)
-            n += 1
-    return n
-
-
-async def run_maintenance(rt: Runtime, now: datetime | None = None) -> None:
-    """Periodic housekeeping: escalations, valve ack timeouts, sensor health. Never raises."""
-    now = now or datetime.now(UTC)
-    try:
-        async with rt.db.session() as session:
-            await alert_engine.run_escalations(session, rt, now)
-            await valve_control.expire_pending(session, now)
-            for flat in await FlatRepository(session).find(limit=10_000):
-                await baseline.refresh_status(session, flat, now)
-        await refresh_sensor_health(rt, now)
-    except Exception:
-        log.exception("maintenance_failed")
 
 
 async def backfill_readings(

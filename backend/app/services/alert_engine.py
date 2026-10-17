@@ -15,6 +15,7 @@ Auto shut-off protocol (tier 3 "ticket" -> tier 4 "auto_shutoff"):
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -35,6 +36,7 @@ from app.repositories import (
 from app.runtime import Runtime
 from app.schemas.domain import AlertOut
 from app.services import detector, valve_control
+from app.services.llm import facts_from_models, schedule_regeneration
 
 log = structlog.get_logger(__name__)
 _UNSET: Any = object()
@@ -119,16 +121,55 @@ def _tier_cap(flat: Flat) -> int:
     return LEARNING_MAX_TIER if flat.baseline_status == "learning" else INITIAL_MAX_TIER
 
 
-def _message(rt: Runtime, flat: Flat, anomaly: Anomaly, tier: int, capped: bool = False) -> str:
-    text = rt.explainer.message(
-        {
-            "unit": flat.unit_number,
-            "anomaly_type": anomaly.anomaly_type,
-            "est_loss_lpm": anomaly.est_loss_lpm,
-            "tier": tier,
-        }
+def _night(anomaly: Anomaly) -> bool | None:
+    feats = anomaly.features or {}
+    return None if "is_night" not in feats else bool(feats["is_night"])
+
+
+def _set_message(
+    session: AsyncSession,
+    rt: Runtime,
+    flat: Flat,
+    anomaly: Anomaly,
+    alert: Alert,
+    tier: int,
+    *,
+    capped: bool = False,
+    note: bool = False,
+) -> None:
+    """Write the instant template text and queue the (optional) LLM upgrade.
+
+    The alert never waits for the LLM: the template text is stored with the alert, and a
+    background task replaces it AFTER the creating transaction committed (see ``run_after_commit``).
+    ``message_source`` always names the origin of the stored text.
+    """
+    view = SimpleNamespace(tier=tier, severity_score=alert.severity_score)
+    ctx = facts_from_models(
+        flat,
+        anomaly,
+        view,
+        night=_night(anomaly),
+        valve_state_confirmed=tier == 4,  # tier 4 is only ever set after the device ack
     )
-    return f"{text} {LEARNING_NOTE}" if capped else text
+    ctx["suffix"] = LEARNING_NOTE if capped or note else None
+    text = rt.explainer.message(ctx)
+    alert.message = f"{text} {LEARNING_NOTE}" if capped or note else text
+    alert.message_source = rt.explainer.source
+    if alert.id is None:
+        alert.id = uuid.uuid4()
+    alert_id, explainer, db = alert.id, rt.explainer, rt.db
+    session.info.setdefault("after_commit", []).append(
+        lambda: schedule_regeneration(db, alert_id, ctx, explainer)
+    )
+
+
+def run_after_commit(session: AsyncSession) -> None:
+    """Run callbacks queued during the transaction that just committed. Never raises."""
+    for fn in session.info.pop("after_commit", []):
+        try:
+            fn()
+        except Exception:
+            log.exception("after_commit_failed")
 
 
 async def _emit(
@@ -191,11 +232,10 @@ async def process_anomaly(
             state=STATE_BY_TIER[tier],
             tier=tier,
             severity_score=anomaly.severity,
-            message=_message(rt, flat, anomaly, tier, capped),
-            message_source=rt.explainer.source,
             escalated_at=[],
         )
     )
+    _set_message(session, rt, flat, anomaly, alert, tier, capped=capped)
     alert.created_at = now  # time-travel friendly (and exact for replayed data)
     metrics.ALERTS_TOTAL.labels(tier=str(tier)).inc()
     details: dict[str, Any] = {"anomaly_type": anomaly.anomaly_type}
@@ -225,7 +265,7 @@ async def _refresh_existing(
     if increased and alert.state in OPEN_STATES and tier > alert.tier:
         previous = alert.state
         _set_tier(alert, tier, now)
-        alert.message = _message(rt, flat, anomaly, tier, capped)
+        _set_message(session, rt, flat, anomaly, alert, tier, capped=capped)
         alert.snoozed_until = None
         alert.shutoff_warned_at = None
         await _emit(
@@ -317,7 +357,7 @@ async def escalate_alert(
         )
         return True
     _set_tier(alert, new_tier, now)
-    alert.message = _message(rt, flat, anomaly, new_tier)
+    _set_message(session, rt, flat, anomaly, alert, new_tier)
     await _emit(session, rt, flat, alert, "escalated", "system")
     return True
 
@@ -385,6 +425,7 @@ async def _try_auto_shutoff(
             },
         )
         await session.commit()
+        run_after_commit(session)
         return True
     if now - _aware(alert.shutoff_warned_at) < timedelta(
         seconds=rt.settings.shutoff_warning_seconds
@@ -442,7 +483,7 @@ async def on_shutoff_confirmed(
     previous = alert.state
     _set_tier(alert, 4, now)
     if anomaly:
-        alert.message = _message(rt, flat, anomaly, 4)
+        _set_message(session, rt, flat, anomaly, alert, 4)
     await _emit(
         session,
         rt,
@@ -475,6 +516,7 @@ async def run_escalations(
                 if alert is not None:
                     changed += int(await escalate_alert(session, rt, alert, now))
                 await session.commit()
+                run_after_commit(session)
             except Exception:
                 log.exception("escalation_failed", alert=str(alert_id))
                 await session.rollback()

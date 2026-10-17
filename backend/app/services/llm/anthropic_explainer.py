@@ -184,7 +184,10 @@ class AnthropicExplainer:
     async def _request(self, facts: Facts, payload: str) -> Any:
         s = self.settings
         user = "Write the alert message for these facts.\n<facts>\n" + payload + "\n</facts>"
-        return await self.client.messages.create(
+        client = self.client
+        if client is None:
+            raise RuntimeError("LLM client unavailable")
+        return await client.messages.create(
             model=s.llm_model,
             max_tokens=s.llm_max_tokens,
             system=SYSTEM_PROMPT.format(language=LANG_NAME[facts.language]),

@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { canTransition } from '@/lib/alertActions';
 import { alertStateLabel, alertStateTone, describeSource, fmtNumber, fmtTime, isOpenAlert, safeAlertMessage } from '@/lib/format';
-import { shutoffPhase } from '@/lib/shutoff';
 import { useAuth } from '@/context/AuthProvider';
 import { useAction } from '@/hooks/useAction';
 import type { Alert } from '@/lib/types';
@@ -30,7 +29,7 @@ export function AlertRow({
   const who = user?.username ?? '';
   const state = String(alert.state);
   const open = isOpenAlert(alert);
-  const warned = shutoffPhase(alert, Date.now(), 0) !== null; // any warning phase highlights the actions
+  const warned = open && state !== 'auto_shutoff' && !!(alert.shutoff_warned_at || alert.shutoff_gave_up_at); // highlights the actions
 
   const act = async (fn: () => Promise<unknown>) => {
     if (!user) return false;

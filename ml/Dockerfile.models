@@ -33,14 +33,17 @@ COPY ml/__init__.py ml/__init__.py
 COPY ml/features ml/features
 COPY ml/scripts ml/scripts
 
-# Defaults = the documented default training config (about a minute on a laptop CPU).
+# Detector: the documented default config (about 2 minutes on one 4-core VM). Forecaster: its
+# default config (12 flats) took 20+ minutes when measured on a shared 4-core VM, so the image uses
+# a smaller cohort; raise ML_FORECAST_FLATS for a better model if build time is not a concern.
 ARG ML_SEED=42
 ARG ML_FLATS=12
 ARG ML_DAYS=30
+ARG ML_FORECAST_FLATS=4
 RUN mkdir /models /reports \
  && python -m ml.scripts.train_detector --seed "$ML_SEED" --flats "$ML_FLATS" --days "$ML_DAYS" \
         --out /models --report-dir /reports \
- && python -m ml.scripts.train_forecaster --seed "$ML_SEED" --flats "$ML_FLATS" --days "$ML_DAYS" \
+ && python -m ml.scripts.train_forecaster --seed "$ML_SEED" --flats "$ML_FORECAST_FLATS" --days "$ML_DAYS" \
         --out /models --report-dir /reports \
  && test -s /models/manifest.json
 

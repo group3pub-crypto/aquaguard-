@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LiveProvider, useLive } from './LiveProvider';
+import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { WithAuth, mockFetch } from '@/test/utils';
 import { IDS, wsFrames } from '@/test/fixtures';
 import { setToken } from '@/lib/session';
@@ -74,5 +75,54 @@ describe('LiveProvider', () => {
     const before = screen.getByTestId('events').textContent;
     send({ type: 'brand_new_type', foo: 1 });
     expect(screen.getByTestId('events').textContent).toBe(before);
+  });
+
+  it('shows a banner with the reason on 4403 and does not reconnect', async () => {
+    render(
+      <WithAuth role="admin">
+        <LiveProvider>
+          <ConnectionBanner />
+        </LiveProvider>
+      </WithAuth>,
+    );
+    await flush();
+    act(() => MockWS.instances[0]?.onclose?.({ code: 4403 }));
+    expect(screen.getByRole('alert')).toHaveTextContent(/no live-feed access/i);
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it('does not connect at all for an unbound account', async () => {
+    render(
+      <WithAuth role="resident" user={{ flat_id: null }}>
+        <LiveProvider>
+          <Probe />
+        </LiveProvider>
+      </WithAuth>,
+    );
+    await flush();
+    expect(MockWS.instances).toHaveLength(0);
+  });
+
+  it('requests a fresh ticket for every reconnect', async () => {
+    let n = 0;
+    const { calls } = mockFetch((url) =>
+      url.pathname.endsWith('/auth/ws-ticket') ? { body: { ticket: `t${++n}`, expires_in: 30 } } : undefined,
+    );
+    vi.useFakeTimers();
+    render(
+      <WithAuth role="admin">
+        <LiveProvider>
+          <Probe />
+        </LiveProvider>
+      </WithAuth>,
+    );
+    await flush();
+    act(() => MockWS.instances[0]?.onclose?.({ code: 1006 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(calls.filter((c) => c.url.pathname.endsWith('/ws-ticket')).map((c) => c.init.method)).toEqual(['POST', 'POST']);
+    expect(MockWS.instances.map((w) => w.url.split('ticket=')[1])).toEqual(['t1', 't2']);
   });
 });

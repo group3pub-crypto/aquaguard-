@@ -155,7 +155,6 @@ class Settings(BaseSettings):
     # retried on the flat's next reading so ingest never queues behind inference
     detect_max_concurrency: int = Field(2, ge=1, le=64)
     dead_letter_size: int = 100
-    explainer_backend: Literal["template"] = "template"
 
     # alerting / valve safety
     valve_ack_timeout_s: float = Field(60.0, gt=0)

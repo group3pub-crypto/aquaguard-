@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from app.config import Settings
-
 TYPE_TEXT = {
     "leak": "a continuous leak",
     "burst": "a possible pipe burst",
@@ -41,9 +39,3 @@ class TemplateExplainer:
         parts.append(TIER_ACTION.get(int(ctx.get("tier", 1)), TIER_ACTION[1]))
         return " ".join(parts)
 
-
-def get_explainer(settings: Settings) -> Explainer:
-    """Only the template backend ships; add e.g. a watsonx class here behind explainer_backend."""
-    if settings.explainer_backend == "template":
-        return TemplateExplainer()
-    raise ValueError(f"unknown explainer backend {settings.explainer_backend!r}")

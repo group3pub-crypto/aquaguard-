@@ -9,6 +9,8 @@ import type {
   Forecast,
   Reading,
   Society,
+  User,
+  LoginResponse,
   SocietyStats,
   ValveCommandRecord,
   ValveInfo,
@@ -152,6 +154,8 @@ export const alert: Alert = {
   acknowledged_by: null,
   acknowledged_at: null,
   resolved_at: null,
+  shutoff_warned_at: null,
+  shutoff_gave_up_at: null,
   created_at: '2026-01-01T10:00:00Z',
   updated_at: '2026-01-01T10:00:00Z',
 };
@@ -173,6 +177,28 @@ export const valveInfo: ValveInfo = {
   valve_state: 'open',
   pending: [valveCommand],
   recent: [valveCommand],
+};
+
+export const userOut: User = {
+  id: '11111111-1111-4111-8111-111111111111',
+  username: 'alice',
+  name: 'Alice Example',
+  role: 'resident',
+  flat_id: IDS.flat,
+  society_id: IDS.society,
+  is_active: true,
+  is_service: false,
+  telegram_id: null,
+  created_at: '2026-01-01T00:00:00Z',
+};
+
+export const tokenResponse: LoginResponse = {
+  access_token: 'access-1',
+  refresh_token: 'refresh-token-value-0001',
+  token_type: 'bearer',
+  role: 'admin',
+  expires_in: 900,
+  refresh_expires_in: 604800,
 };
 
 /** Real WebSocket frames, as broadcast by the backend. */

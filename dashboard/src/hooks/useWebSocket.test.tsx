@@ -74,7 +74,7 @@ describe('useWebSocket', () => {
     expect(MockWS.instances).toHaveLength(1);
     const expected = [1000, 2000, 4000];
     for (let i = 0; i < expected.length; i++) {
-      const delay = expected[i]!;
+      const delay = expected[i] ?? 0;
       act(() => MockWS.instances[i]?.fail());
       expect(result.current.state).toBe('reconnecting');
       await act(async () => {
@@ -248,7 +248,8 @@ describe('useWebSocket', () => {
     const onMessage = vi.fn();
     renderHook(() => useWebSocket({ getUrl: fixedUrl, onMessage }));
     await flush();
-    const ws = MockWS.instances[0]!;
+    const ws = MockWS.instances[0];
+    if (!ws) throw new Error('no socket');
     const send = vi.fn();
     (ws as unknown as { send: typeof send }).send = send;
     act(() => ws.onmessage?.({ data: '{"type":"ping"}' } as MessageEvent));

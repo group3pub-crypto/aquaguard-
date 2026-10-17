@@ -25,10 +25,9 @@ export function NotFoundState({ what = 'item' }: { what?: string }) {
 export function UnboundState() {
   return (
     <div role="status" className="mx-auto max-w-xl rounded-lg border border-line bg-panel p-8 text-center">
-      <h1 className="text-2xl font-semibold">Your account is not linked to a home yet</h1>
+      <h1 className="text-2xl font-semibold">Your account is not linked to a home yet — contact your administrator</h1>
       <p className="mt-2 text-ink-2">
-        Your account is not linked to a home yet - contact your administrator. Once they link it you will see your
-        water usage and alerts here.
+        Contact your administrator to have it linked. Once that is done you will see your water usage and alerts here.
       </p>
     </div>
   );

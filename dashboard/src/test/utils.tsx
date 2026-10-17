@@ -39,12 +39,19 @@ export function mockFetch(handler: Handler) {
   return { fn, calls };
 }
 
-export function makeUser(role: Role, username = 'alice'): User {
-  return { id: '11111111-1111-4111-8111-111111111111', username, name: 'Alice Example', role };
+const BOUND: Record<Role, Partial<User>> = {
+  admin: {},
+  maintenance: { society_id: '0b1c3a52-6d1f-4f5e-9a39-0d1b5a2f7c11' },
+  resident: { flat_id: '3f8e4a6c-2b6d-4c2e-8f55-7a1d9e0b4c22' },
+};
+
+/** Users are bound to their scope by default; pass `extra` (e.g. flat_id: null) to make one unbound. */
+export function makeUser(role: Role, username = 'alice', extra: Partial<User> = {}): User {
+  return { id: '11111111-1111-4111-8111-111111111111', username, name: 'Alice Example', role, ...BOUND[role], ...extra };
 }
 
-export function authValue(role: Role | null, username = 'alice'): AuthContextValue {
-  const user = role ? makeUser(role, username) : null;
+export function authValue(role: Role | null, username = 'alice', extra: Partial<User> = {}): AuthContextValue {
+  const user = role ? makeUser(role, username, extra) : null;
   return {
     user,
     token: role ? 'tok' : null,
@@ -57,8 +64,8 @@ export function authValue(role: Role | null, username = 'alice'): AuthContextVal
   };
 }
 
-export function WithAuth({ role, children, username }: { role: Role | null; children: ReactNode; username?: string }) {
-  return <AuthContext.Provider value={authValue(role, username)}>{children}</AuthContext.Provider>;
+export function WithAuth({ role, children, username, user }: { role: Role | null; children: ReactNode; username?: string; user?: Partial<User> }) {
+  return <AuthContext.Provider value={authValue(role, username, user)}>{children}</AuthContext.Provider>;
 }
 
 export { alert as sampleAlert } from './fixtures';

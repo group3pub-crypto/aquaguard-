@@ -3,7 +3,8 @@
 // `npm run snapshot:openapi`). The validator is intentionally lightweight.
 import { describe, expect, it } from 'vitest';
 import snapshot from './openapi.snapshot.json';
-import { api } from './api';
+import { api, refreshSession } from './api';
+import { setTokens } from './session';
 import * as fx from '@/test/fixtures';
 import { mockFetch } from '@/test/utils';
 
@@ -98,6 +99,20 @@ describe('api client matches the backend OpenAPI snapshot', () => {
     { name: 'login', run: () => api.login({ username: 'a', password: 'b' }) },
     { name: 'register', run: () => api.register({ username: 'abc', password: 'passw0rdx', name: 'A' }) },
     { name: 'me', run: () => api.me() },
+    { name: 'wsTicket', run: () => api.wsTicket() },
+    { name: 'changePassword', run: () => api.changePassword({ current_password: 'old-pass1', new_password: 'new-pass2' }) },
+    { name: 'createSociety', run: () => api.createSociety({ name: 'A', slug: 'a-b', address: null }) },
+    { name: 'updateSociety', run: () => api.updateSociety(fx.IDS.society, { name: 'B', address: 'x' }) },
+    { name: 'deleteSociety', run: () => api.deleteSociety(fx.IDS.society) },
+    { name: 'createFlat', run: () => api.createFlat({ society_id: fx.IDS.society, unit_number: 'A-1', floor: 2, residents: 3, sensor_id: 'esp-1' }) },
+    { name: 'updateFlat', run: () => api.updateFlat(F, { floor: 1, residents: 2, sensor_id: 'esp-2' }) },
+    { name: 'deleteFlat', run: () => api.deleteFlat(F) },
+    { name: 'users', run: () => api.users({ role: 'resident', is_active: true, q: 'al', limit: 50, offset: 0 }) },
+    { name: 'createUser', run: () => api.createUser({ username: 'bob', name: 'Bob', password: 'passw0rdx', role: 'resident', flat_id: F, society_id: null }) },
+    { name: 'updateUser', run: () => api.updateUser(fx.userOut.id, { is_active: false }) },
+    { name: 'setUserBinding', run: () => api.setUserBinding(fx.userOut.id, { flat_id: F, society_id: null }) },
+    { name: 'resetUserPassword', run: () => api.resetUserPassword(fx.userOut.id, 'Passw0rdxyz') },
+    { name: 'logoutUserEverywhere', run: () => api.logoutUserEverywhere(fx.userOut.id) },
     { name: 'societies', run: () => api.societies() },
     { name: 'societyStats', run: () => api.societyStats(fx.IDS.society) },
     { name: 'flats', run: () => api.flats(fx.IDS.society) },
@@ -132,11 +147,25 @@ describe('api client matches the backend OpenAPI snapshot', () => {
       const p = params.find((x) => x.in === 'query' && x.name === k);
       expect(p, `query param "${k}" not accepted by ${tpl}`).toBeDefined();
       if (p?.schema) {
-        const typed = p.schema.type === 'integer' ? Number(v) : p.schema.type === 'boolean' ? v === 'true' : v;
+        const alts = ((p.schema.anyOf as Json[] | undefined) ?? [p.schema]).map((a) => a.type);
+        const typed = alts.includes('integer') ? Number(v) : alts.includes('boolean') ? v === 'true' : v;
         expect(validate(p.schema, typed)).toEqual([]);
       }
     }
     if (c.body !== undefined) expect(validate(bodySchema(tpl, method), c.body)).toEqual([]);
+  });
+
+  it('refresh and logout use the documented paths and bodies', async () => {
+    setTokens({ access_token: 'a', refresh_token: 'r'.repeat(24), expires_in: 1 }, 0);
+    const { calls: seen } = mockFetch(() => ({ body: fx.tokenResponse }));
+    await refreshSession();
+    await api.logout();
+    for (const c of seen) {
+      const tpl = templateFor(c.url.pathname, 'post');
+      expect(tpl, c.url.pathname).toBeDefined();
+      if (tpl) expect(validate(bodySchema(tpl, 'post'), c.body)).toEqual([]);
+    }
+    expect(seen.map((c) => c.url.pathname)).toEqual(['/api/v1/auth/refresh', '/api/v1/auth/logout']);
   });
 
   it('does not call any demo endpoint', () => {
@@ -156,6 +185,11 @@ describe('fixtures validate against backend response schemas', () => {
     ['forecast', '/api/v1/flats/{flat_id}/forecast', 'get', fx.forecast],
     ['anomalies', '/api/v1/anomalies', 'get', [fx.anomaly, fx.ruleAnomaly]],
     ['alerts', '/api/v1/alerts', 'get', [fx.alert]],
+    ['user', '/api/v1/users', 'get', [fx.userOut]],
+    ['login tokens', '/api/v1/auth/login', 'post', fx.tokenResponse],
+    ['refresh tokens', '/api/v1/auth/refresh', 'post', fx.tokenResponse],
+    ['change-password tokens', '/api/v1/auth/change-password', 'post', fx.tokenResponse],
+    ['ws ticket', '/api/v1/auth/ws-ticket', 'post', { ticket: 'abc', expires_in: 30 }],
     ['valve status', '/api/v1/valves/{flat_id}', 'get', fx.valveInfo],
     ['valve command', '/api/v1/valves/{flat_id}/close', 'post', fx.valveCommand],
   ];

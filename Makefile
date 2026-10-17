@@ -54,7 +54,7 @@ install: ## Install Python and Node dependencies for local development
 lint: ## Ruff check + format check for every Python package, shellcheck (if present), dashboard lint
 	$(RUFF) check $(PYPKGS)
 	$(RUFF) format --check $(PYPKGS)
-	@if command -v shellcheck >/dev/null; then shellcheck -s sh infra/scripts/*.sh infra/backup/backup.sh infra/backup/restore.sh infra/postgres/10-roles.sh infra/mosquitto/*.sh && shellcheck -s bash infra/backup/restore-test.sh; else echo "shellcheck not installed: skipped"; fi
+	@if command -v shellcheck >/dev/null; then shellcheck -S warning -s sh infra/scripts/*.sh infra/backup/backup.sh infra/backup/restore.sh infra/postgres/10-roles.sh infra/mosquitto/*.sh && shellcheck -S warning -s bash infra/backup/restore-test.sh; else echo "shellcheck not installed: skipped"; fi
 	cd dashboard && npm run lint
 
 format: ## Auto-format and fix

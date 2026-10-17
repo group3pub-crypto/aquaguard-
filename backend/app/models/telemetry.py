@@ -36,9 +36,13 @@ class FlowReading(Base):
     # Firmware extras (validated by FlowPayload since 0001; persisted from 0003 on).
     total_volume: Mapped[float | None] = mapped_column(sa.Float)  # `tot`: persisted lifetime litres
     battery_volts: Mapped[float | None] = mapped_column(sa.Float)  # `vbat`, when the ADC is fitted
-    device_valve_state: Mapped[str | None] = mapped_column(sa.String(10))  # `valve`: device's own view
+    device_valve_state: Mapped[str | None] = mapped_column(
+        sa.String(10)
+    )  # `valve`: device's own view
     firmware_version: Mapped[str | None] = mapped_column(sa.String(32))  # `fw`
-    fault_codes: Mapped[list[str] | None] = mapped_column(JSONType)  # `err`: device-reported fault codes
+    fault_codes: Mapped[list[str] | None] = mapped_column(
+        JSONType
+    )  # `err`: device-reported fault codes
 
 
 class Baseline(Base):

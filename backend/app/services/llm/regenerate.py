@@ -25,6 +25,8 @@ async def regenerate_message(alert: Any, ctx: dict[str, Any], explainer: Any) ->
     gen = getattr(explainer, "generate", None)
     if gen is None or getattr(alert, "state", None) in _CLOSED:
         return None
+    if ctx.get("tier") is not None and getattr(alert, "tier", ctx["tier"]) != ctx["tier"]:
+        return None  # escalated meanwhile: the newer tier owns the message
     result = await gen(ctx, cache_ref=str(alert.id))
     alert.message, alert.message_source = result.text, result.source
     return result.source
