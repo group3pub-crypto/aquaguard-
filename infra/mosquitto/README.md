@@ -25,3 +25,17 @@ environment variables and the `*.template` files, then `exec`s mosquitto. `allow
 
 Native example: `MQTT_RUNTIME_DIR=/tmp/aq MQTT_DATA_DIR=/tmp/aq/data MQTT_LISTEN_ADDR=127.0.0.1 MQTT_LISTEN_PORT=51883 MQTT_USERNAME=... MQTT_PASSWORD=... sh infra/mosquitto/entrypoint.sh`.
 Rotating `MQTT_DEVICE_SECRET` and restarting the broker rotates every device password.
+
+## TLS (devices) and listeners
+
+* `1883` plain MQTT: bound to `MQTT_LISTEN_ADDR` (default **127.0.0.1**) - for the backend only. Compose sets
+  `0.0.0.0` *inside* the container because the backend reaches it over the private compose network; the
+  published host port is `127.0.0.1:1883`.
+* `8883` TLS: enabled when `MQTT_TLS_CERT_FILE` + `MQTT_TLS_KEY_FILE` are set (`MQTT_TLS_CA_FILE` optional).
+  Username/password + the same ACL; `require_certificate false`. The cert files are copied into the
+  broker's private runtime dir. TLS 1.0/1.1 are rejected and 1.2/1.3 accepted (verified with
+  `openssl s_client` against Mosquitto 2.0.18 on Ubuntu's OpenSSL 3.0; the stock `eclipse-mosquitto`
+  image was not tested).
+* Dev certificates: `sh infra/scripts/gen-dev-certs.sh [dir]` (local CA + server cert, 30 days, output is
+  git-ignored). Clients: `mosquitto_pub --cafile ca.crt -h localhost -p 8883 ...`, backend
+  `MQTT_TLS_CA_FILE`/`mqtt_tls_ca_file`, simulator `--tls-ca`.

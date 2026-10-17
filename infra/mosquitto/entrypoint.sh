@@ -90,23 +90,24 @@ TLS=no
 if [ -n "${MQTT_TLS_CERT_FILE:-}${MQTT_TLS_KEY_FILE:-}" ]; then
   [ -r "${MQTT_TLS_CERT_FILE:-}" ] || die "cannot read MQTT_TLS_CERT_FILE"
   [ -r "${MQTT_TLS_KEY_FILE:-}" ] || die "cannot read MQTT_TLS_KEY_FILE"
+  # copy into the (mosquitto-owned, 0700) runtime dir: independent of mount permissions and
+  # of whether the broker reads key material before or after dropping privileges
+  cp "$MQTT_TLS_CERT_FILE" "$RUN_DIR/tls-cert.pem"
+  cp "$MQTT_TLS_KEY_FILE" "$RUN_DIR/tls-key.pem"
   CAFILE=""
   if [ -n "${MQTT_TLS_CA_FILE:-}" ]; then
     [ -r "$MQTT_TLS_CA_FILE" ] || die "cannot read MQTT_TLS_CA_FILE"
-    CAFILE="cafile $MQTT_TLS_CA_FILE"
+    cp "$MQTT_TLS_CA_FILE" "$RUN_DIR/tls-ca.pem"
+    CAFILE="cafile $RUN_DIR/tls-ca.pem"
   fi
-  # TLS >= 1.2 only: tls_version pins a single version, so list the allowed modern ciphers
-  # and disable the legacy protocol versions via the OpenSSL min protocol (see README).
   LISTENERS="$LISTENERS
 
 listener ${MQTT_TLS_PORT:-8883} ${MQTT_TLS_ADDR:-0.0.0.0}
 protocol mqtt
-certfile $MQTT_TLS_CERT_FILE
-keyfile $MQTT_TLS_KEY_FILE
+certfile $RUN_DIR/tls-cert.pem
+keyfile $RUN_DIR/tls-key.pem
 $CAFILE
-require_certificate false
-tls_version tlsv1.2
-ciphers_tls1.3 TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256"
+require_certificate false"
   TLS=yes
 fi
 sed -e "s|__RUNTIME_DIR__|$RUN_DIR|g" -e "s|__DATA_DIR__|${DATA_DIR%/}|g" \
@@ -116,10 +117,10 @@ sed -e "s|__RUNTIME_DIR__|$RUN_DIR|g" -e "s|__DATA_DIR__|${DATA_DIR%/}|g" \
 
 # mosquitto drops privileges to the "mosquitto" user when started as root
 if [ "$(id -u)" = 0 ] && id mosquitto >/dev/null 2>&1; then
-  chown mosquitto:mosquitto "$RUN_DIR" "$RUN_DIR/passwd" "$ACL" "$RUN_DIR/mosquitto.conf" 2>/dev/null || true
+  chown mosquitto:mosquitto "$RUN_DIR" "$RUN_DIR"/* 2>/dev/null || true
   chown mosquitto:mosquitto "$DATA_DIR" 2>/dev/null || true
 fi
-chmod 0700 "$RUN_DIR"; chmod 0600 "$RUN_DIR/passwd" "$ACL"
+chmod 0700 "$RUN_DIR"; chmod 0600 "$RUN_DIR"/*
 
 echo "mosquitto entrypoint: rendered $RUN_DIR (devices=$n tls=$TLS control=$([ -n "$CONTROL" ] && echo yes || echo no))" >&2
 [ "${MQTT_RENDER_ONLY:-0}" = 1 ] && exit 0

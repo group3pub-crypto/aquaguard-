@@ -283,9 +283,11 @@ async def run_mqtt(
     username: str | None = None,
     password: str | None = None,
     tick_s: float = 0.2,
+    tls_ca: str | None = None,
 ) -> None:
     import aiomqtt
 
+    tls = aiomqtt.TLSParameters(ca_certs=tls_ca) if tls_ca else None
     backoff = 1.0
     while not stop.is_set():
         try:
@@ -296,6 +298,7 @@ async def run_mqtt(
                 password=password,
                 identifier=f"aquaguard-edge-{sim.society}",
                 keepalive=30,
+                tls_params=tls,
             ) as client:
                 backoff = 1.0
                 log.info("connected to %s:%s", host, port)
@@ -355,11 +358,13 @@ async def run_mqtt_per_device(
     control_username: str | None = None,
     control_password: str | None = None,
     tick_s: float = 0.2,
+    tls_ca: str | None = None,
 ) -> None:
     """One broker connection per simulated flat, each with its own broker account (ACL-limited
     to that flat's topics), plus one control connection for fault/speed messages."""
     import aiomqtt
 
+    tls = aiomqtt.TLSParameters(ca_certs=tls_ca) if tls_ca else None
     queues: dict[str, asyncio.Queue[Outgoing]] = {u: asyncio.Queue() for u in sim.flats}
 
     async def reconnecting(name: str, body) -> None:
@@ -386,6 +391,7 @@ async def run_mqtt_per_device(
                 password=device_password(device_secret, sim.society, unit),
                 identifier=f"aquaguard-edge-{sim.society}-{unit}",
                 keepalive=30,
+                tls_params=tls,
             ) as client:
                 await client.subscribe(f"aquaguard/{sim.society}/{unit}/valve/cmd", qos=1)
 
@@ -418,6 +424,7 @@ async def run_mqtt_per_device(
                 password=control_password,
                 identifier=f"aquaguard-edge-{sim.society}-control",
                 keepalive=30,
+                tls_params=tls,
             ) as client:
                 await client.subscribe(CONTROL_FAULT_TOPIC, qos=1)
                 await client.subscribe(CONTROL_SPEED_TOPIC, qos=1)

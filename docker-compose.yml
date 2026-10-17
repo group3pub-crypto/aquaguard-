@@ -36,13 +36,24 @@ services:
       MQTT_DEVICE_SECRET: ${MQTT_DEVICE_SECRET:-}
       MQTT_CONTROL_USERNAME: ${MQTT_CONTROL_USERNAME:-}
       MQTT_CONTROL_PASSWORD: ${MQTT_CONTROL_PASSWORD:-}
+      # plain listener is only reachable on the private compose network (the host port below is
+      # loopback-only); devices must use the TLS listener
+      MQTT_LISTEN_ADDR: 0.0.0.0
+      MQTT_TLS_CERT_FILE: ${MQTT_TLS_CERT_FILE:-}
+      MQTT_TLS_KEY_FILE: ${MQTT_TLS_KEY_FILE:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
     volumes:
       - ./infra/mosquitto:/mosquitto/config:ro
       - ./infra/mosquitto/entrypoint.sh:/entrypoint.sh:ro
+      # TLS material (e.g. from infra/scripts/gen-dev-certs.sh .dev-certs, or your real CA);
+      # set MQTT_TLS_CERT_FILE=/mosquitto/certs/server.crt etc. to enable port 8883
+      - ${MQTT_TLS_DIR:-./.dev-certs}:/mosquitto/certs:ro
       - mosquitto_data:/mosquitto/data
     tmpfs: ["/tmp"]
     read_only: true
-    ports: ["127.0.0.1:1883:1883"]
+    ports:
+      - "127.0.0.1:1883:1883"
+      - "${MQTT_TLS_BIND:-127.0.0.1}:8883:8883"
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -h localhost -u \"$${MQTT_USERNAME}\" -P \"$${MQTT_PASSWORD}\" -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null"]
       interval: 10s
