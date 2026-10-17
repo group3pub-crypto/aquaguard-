@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     bot_poll_interval: float = Field(30.0, ge=5)
     bot_send_rate: float = Field(25.0, gt=0, le=30)
     bot_api_timeout: float = 10.0
+    # Optional LLM "smart mode" (natural-language intent routing). Off unless BOT_NLU_ENABLED=true.
+    bot_nlu_enabled: bool = False
+    anthropic_api_key: SecretStr | None = None
+    llm_model: str = "claude-haiku-5-5"  # claude-sonnet-5-5 is the optional upgrade
+    llm_timeout_s: float = Field(15.0, gt=0, le=60)
+    bot_nlu_user_per_min: int = Field(10, ge=1)
+    bot_nlu_user_per_day: int = Field(100, ge=1)
+    bot_nlu_global_per_day: int = Field(1000, ge=1)
+    bot_nlu_max_rounds: int = Field(3, ge=1, le=3)
 
     @field_validator("telegram_bot_token", "bot_api_password")
     @classmethod
@@ -30,6 +39,11 @@ class Settings(BaseSettings):
         if not raw or raw.startswith("CHANGE_ME"):
             raise ValueError("must be set to a real value")
         return v
+
+    @property
+    def nlu_api_key(self) -> str | None:
+        raw = self.anthropic_api_key.get_secret_value().strip() if self.anthropic_api_key else ""
+        return raw if raw and not raw.startswith("CHANGE_ME") else None
 
     @property
     def admin_ids(self) -> set[int]:

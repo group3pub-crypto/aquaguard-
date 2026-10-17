@@ -44,9 +44,7 @@ class ConnectionManager:
     def user_full(self, user_id: str) -> bool:
         return self.count_for(user_id) >= self.max_per_user
 
-    def add(
-        self, ws: WebSocket, user_id: str, scope: Scope, filters: Iterable[str] = ()
-    ) -> Client:
+    def add(self, ws: WebSocket, user_id: str, scope: Scope, filters: Iterable[str] = ()) -> Client:
         client = Client(ws, user_id, scope, {f for f in filters if f})
         self._clients.append(client)
         return client

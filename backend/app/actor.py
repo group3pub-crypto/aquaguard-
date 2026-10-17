@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from app.models import User
 
 MAX_ON_BEHALF_OF = 100
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 
 
 def sanitize_on_behalf_of(value: str | None) -> str | None:

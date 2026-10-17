@@ -136,6 +136,3 @@ async def run_cycle(rt: Runtime, now: datetime | None = None) -> dict[str, int |
             log.exception("maintenance_step_failed", step=name)
             summary[name] = None
     return summary
-
-
-

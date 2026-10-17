@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
-from sqlalchemy import Integer, func, literal, select, update
+from sqlalchemy import ColumnElement, Integer, func, literal, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models import SensorHealth
+from app.models.base import UTCDateTime
 from app.repositories.base import BaseRepository
-
 
 EXPECTED_INTERVAL_S = 60.0
 
@@ -34,7 +35,7 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
             )
             # a row cached in this session (if any) is now stale
             cached = self.session.identity_map.get(
-                sa_inspect(SensorHealth).identity_key_from_primary_key((flat_id,))  # type: ignore[union-attr]
+                sa_inspect(SensorHealth).identity_key_from_primary_key((flat_id,))
             )
             if cached is not None:
                 self.session.expire(cached)
@@ -74,10 +75,13 @@ class SensorHealthRepository(BaseRepository[SensorHealth]):
                 .returning(SensorHealth.flat_id)
             )
             changed.extend((fid, status) for fid in res.scalars().all())
+        age_s: ColumnElement[Any]
         if self.dialect == "postgresql":
-            age_s = func.extract("epoch", literal(now) - SensorHealth.last_seen)
+            age_s = func.extract("epoch", literal(now, UTCDateTime) - SensorHealth.last_seen)
         else:
-            age_s = (func.julianday(literal(now)) - func.julianday(SensorHealth.last_seen)) * 86400
+            age_s = (
+                func.julianday(literal(now, UTCDateTime)) - func.julianday(SensorHealth.last_seen)
+            ) * 86400
         await self.session.execute(
             update(SensorHealth)
             .where(SensorHealth.last_seen.is_not(None), SensorHealth.status != "online")

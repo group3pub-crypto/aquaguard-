@@ -24,6 +24,7 @@ from app.runtime import Runtime
 from app.schemas.domain import ReadingOut
 from app.schemas.mqtt import MAX_PAYLOAD_BYTES, FlowPayload, HeartbeatPayload, ValveAckPayload
 from app.services import alert_engine, baseline, detector, valve_control
+from app.services.batcher import ReadingBatcher
 
 log = structlog.get_logger(__name__)
 LATE_AFTER = timedelta(minutes=2)
@@ -155,33 +156,38 @@ async def handle_flow(rt: Runtime, parsed: ParsedTopic, payload: bytes) -> None:
     now = datetime.now(UTC)
     check_reading_age(rt, ts, now)
     try:
-        async with rt.db.session() as session:
-            flat_id, society_id = await _flat_ids(rt, session, parsed)
-            reading = FlowReading(
-                flat_id=flat_id,
-                timestamp=ts,
-                flow_rate=data.flow,
-                volume=data.vol,
-                pressure=data.psi,
-                temperature=data.tmp,
-                battery_pct=None if data.bat is None else round(data.bat),
-                rssi=data.rssi,
-                message_id=data.id.lower(),
-                received_at=now,
-            )
-            if not await ReadingRepository(session).add_idempotent(reading):
-                rt.counters["flow_duplicate"] += 1
-                return
-            await SensorHealthRepository(session).upsert(
-                flat_id, last_seen=now, status="online", missed_readings=0
-            )
-            out = ReadingOut.model_validate(reading).model_dump(mode="json")
+        hit = rt.flat_cache.get((parsed.slug, parsed.unit))
+        if hit and hit[2] > time.monotonic():
+            flat_id, society_id = hit[0], hit[1]
+        else:
+            async with rt.db.session() as session:
+                flat_id, society_id = await _flat_ids(rt, session, parsed)
+        values = {
+            "flat_id": flat_id,
+            "timestamp": ts,
+            "flow_rate": data.flow,
+            "volume": data.vol,
+            "pressure": data.psi,
+            "temperature": data.tmp,
+            "battery_pct": None if data.bat is None else round(data.bat),
+            "rssi": data.rssi,
+            "message_id": data.id.lower(),
+            "received_at": now,
+        }
+        if rt.batcher is None:
+            rt.batcher = ReadingBatcher(rt)
+        reading_id = await rt.batcher.add(values)
+        if reading_id is None:
+            rt.counters["flow_duplicate"] += 1
+            return
     except Exception:
         rt.flat_cache.pop((parsed.slug, parsed.unit), None)  # e.g. flat deleted: re-resolve
         raise
     rt.counters["flow_ok"] += 1
     rt.last_flow_monotonic = time.monotonic()
-    await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
+    if rt.ws.count:
+        out = ReadingOut.model_validate({"id": reading_id, **values}).model_dump(mode="json")
+        await rt.ws.broadcast({"type": "reading", **out}, [str(flat_id), str(society_id)])
     # detection runs on wall-clock time; the reading's own ts only counts when it is not in the
     # future beyond the configured skew (accelerated demo simulator), so a stale or forged ts
     # can never move the detection window

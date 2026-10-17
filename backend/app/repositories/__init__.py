@@ -1,7 +1,7 @@
 from app.repositories.alert import AlertRepository
 from app.repositories.anomaly import AnomalyRepository
-from app.repositories.auth import RefreshTokenRepository, WsTicketRepository
 from app.repositories.audit import AuditRepository
+from app.repositories.auth import RefreshTokenRepository, WsTicketRepository
 from app.repositories.baseline import BaselineRepository
 from app.repositories.flat import FlatRepository
 from app.repositories.forecast import ForecastRepository

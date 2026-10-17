@@ -243,9 +243,7 @@ async def _refresh_existing(
 
 
 # ------------------------------------------------------------------------------ escalation
-async def _active_use(
-    session: AsyncSession, rt: Runtime, flat: Flat, now: datetime
-) -> bool | None:
+async def _active_use(session: AsyncSession, rt: Runtime, flat: Flat, now: datetime) -> bool | None:
     """Is somebody using water? None when there is not enough RECENT data to tell.
 
     Looks back ACTIVE_USE_WINDOW_MIN minutes, sliding the 15-minute raw zero-flow measure
@@ -270,9 +268,7 @@ async def _cancel_warning(
     session: AsyncSession, rt: Runtime, flat: Flat, alert: Alert, reason: str, actor="system"
 ) -> None:
     alert.shutoff_warned_at = None
-    await _emit(
-        session, rt, flat, alert, "shutoff_warning_cancelled", actor, {"reason": reason}
-    )
+    await _emit(session, rt, flat, alert, "shutoff_warning_cancelled", actor, {"reason": reason})
 
 
 async def escalate_alert(
@@ -390,7 +386,9 @@ async def _try_auto_shutoff(
         )
         await session.commit()
         return True
-    if now - _aware(alert.shutoff_warned_at) < timedelta(seconds=rt.settings.shutoff_warning_seconds):
+    if now - _aware(alert.shutoff_warned_at) < timedelta(
+        seconds=rt.settings.shutoff_warning_seconds
+    ):
         return False
 
     # --- execute (attempt 1) or retry (attempt 2); the alert stays at 'ticket' until confirmed

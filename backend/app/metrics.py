@@ -82,4 +82,4 @@ def instrument_detection() -> None:
             DETECTION_SECONDS.observe(time.perf_counter() - t0)
 
     timed._timed = True  # type: ignore[attr-defined]
-    detector.run_detection = timed  # type: ignore[assignment]
+    detector.run_detection = timed

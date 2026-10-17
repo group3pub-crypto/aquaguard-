@@ -226,7 +226,9 @@ async def rotate_refresh_token(
     return RefreshOutcome("ok", pair, user, row.family_id)
 
 
-async def revoke_refresh_token(session: AsyncSession, raw: str, now: datetime | None = None) -> bool:
+async def revoke_refresh_token(
+    session: AsyncSession, raw: str, now: datetime | None = None
+) -> bool:
     """Logout: revoke the presented token's whole family. Unknown tokens are ignored."""
     repo = RefreshTokenRepository(session)
     row = await repo.get_by_hash(hash_token(raw))

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import delete, literal_column, select
+from sqlalchemy import ColumnElement, delete, literal_column, select
 
 from app.config import Settings
 from app.database import Database
@@ -31,11 +31,11 @@ async def purge_older_than(
     table = model.__table__
     while True:
         if pg:
-            ctid = literal_column(f"{table.name}.ctid")
+            ctid: ColumnElement[Any] = literal_column(f"{table.name}.ctid")
             inner = select(ctid).select_from(table).where(ts_col < cutoff).limit(batch_size)
             stmt = delete(model).where(ctid.in_(inner))
         else:
-            pk = list(table.primary_key.columns)[0]
+            pk = next(iter(table.primary_key.columns))
             inner = select(pk).where(ts_col < cutoff).limit(batch_size)
             stmt = delete(model).where(pk.in_(inner))
         async with db.session() as session:

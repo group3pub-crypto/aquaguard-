@@ -113,7 +113,11 @@ async def handle_ack(
 
     flat.valve_state = state
     match = next(
-        (c for c in await ValveRepository(session).ackable_for_flat(flat.id) if c.id.hex[:8] == short_id),
+        (
+            c
+            for c in await ValveRepository(session).ackable_for_flat(flat.id)
+            if c.id.hex[:8] == short_id
+        ),
         None,
     )
     late = False

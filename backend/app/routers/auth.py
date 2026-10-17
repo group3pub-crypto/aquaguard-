@@ -50,7 +50,7 @@ def _tokens(pair: auth_svc.TokenPair, role: str) -> TokenResponse:
     return TokenResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,
-        role=role,  # type: ignore[arg-type]
+        role=role,
         expires_in=pair.expires_in,
         refresh_expires_in=pair.refresh_expires_in,
     )
@@ -85,7 +85,9 @@ async def login(request: Request, body: LoginRequest, rt: RT, session: Session):
     limiter.check(request, "login", LOGIN_LIMIT, username)  # per IP + username
     limiter.check(request, "login-ip", LOGIN_IP_LIMIT)  # per IP, any username
     ip, ua = _client(request)
-    user = await auth_svc.authenticate(UserRepository(session), rt.settings, username, body.password)
+    user = await auth_svc.authenticate(
+        UserRepository(session), rt.settings, username, body.password
+    )
     if user is None:
         await session.commit()  # keep the failure counters / lockout (we raise right after)
         log.info("login_failed", username=username[:50])

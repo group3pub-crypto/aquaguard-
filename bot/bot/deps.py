@@ -24,6 +24,7 @@ class Deps:
     limiter: RateLimiter
     audit: AuditLog = field(default_factory=AuditLog)
     confirm: ConfirmStore = field(default_factory=ConfirmStore)
+    nlu: Any = None  # bot.nlu.NluRouter when smart mode is enabled
 
 
 def get_deps(context: Any) -> Deps:

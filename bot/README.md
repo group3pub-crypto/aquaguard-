@@ -80,3 +80,35 @@ tests check request paths, params and bodies against it.
 
 Register a user (e.g. `bot_service`) via the API/dashboard, then promote it with
 `PUT /api/v1/auth/users/{id}/role` to `admin`. Put its credentials in `BOT_API_USERNAME` / `BOT_API_PASSWORD`.
+
+## Smart mode: natural-language requests (optional, off by default)
+
+With `BOT_NLU_ENABLED=true`, free text is routed by an Anthropic model using tool calling over the registry above.
+Install `pip install -e "bot[llm]"`. Without the package, a key, or on any outage/limit, the bot tells the user
+"Smart mode is unavailable" and uses the keyword intents.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `BOT_NLU_ENABLED` | `false` | Single flag that turns the feature (and all data sharing) off. |
+| `ANTHROPIC_API_KEY` | unset | Environment only. |
+| `LLM_MODEL` | `claude-haiku-5-5` | `claude-sonnet-5-5` optional. |
+| `LLM_TIMEOUT_S` | `15` | Per model call. |
+| `BOT_NLU_USER_PER_MIN` / `BOT_NLU_USER_PER_DAY` | `10` / `100` | Per Telegram user. |
+| `BOT_NLU_GLOBAL_PER_DAY` | `1000` | Global budget of LLM requests per UTC day. |
+| `BOT_NLU_MAX_ROUNDS` | `3` | Max tool-call rounds per message. |
+
+**Safety model.** The model only sees tools allowed for the user's role (resident: read tools for their own flat,
+no `unit` argument; maintenance adds ack/snooze/resolve; admin adds `set_valve`). Every `tool_use` is checked against
+that list and the registry's argument validation; read tools run through `registry.call`, which re-checks role and
+flat scope. Mutating tools are never executed by the model: they become inline-button confirmations (`valve:*` for
+valves, `nlu:*` for alert actions), bound to user/chat/message, single-use, 60 s, and re-checked on press. Tool output
+goes back as `<tool_result_data>` untrusted data; answers are trimmed (800 chars) and sent MarkdownV2-escaped.
+Memory: last 6 turns per chat, in memory, 30 min TTL; bot/API tokens and key-like strings are redacted.
+The audit log records `nlu_request`, `nlu_tool`, `nlu_proposal`, `nlu_tool_rejected`, `nlu_confirmed`, `nlu_fallback`
+with a message hash and length only, never the message body.
+
+**Data sent to the provider:** the user's message text (up to 500 chars), recent turns of that chat, the role (and
+bound flat unit for residents), tool schemas, and tool results (alert texts, usage figures, loss tables, which can
+contain flat unit labels). Not sent: Telegram ids/usernames, backend credentials or JWTs. Users may type personal data
+into free text, so review your DPA/privacy notice before enabling. Costs depend on traffic and the model; limits above
+cap calls, and no prices are stated here.

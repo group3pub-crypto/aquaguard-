@@ -76,6 +76,8 @@ async def prometheus(rt: RT, authorization: Annotated[str | None, Header()] = No
     supplied = authorization[7:] if authorization and authorization[:7].lower() == "bearer " else ""
     if not hmac.compare_digest(supplied.encode(), s.metrics_token.encode()):
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Not authenticated", headers={"WWW-Authenticate": "Bearer"}
+            status.HTTP_401_UNAUTHORIZED,
+            "Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return PlainTextResponse(generate_latest(metrics.registry), media_type=CONTENT_TYPE_LATEST)

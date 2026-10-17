@@ -7,9 +7,11 @@ identifiers (the login limit uses IP + username).
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import HTTPException, Request, status
 from limits import parse
-from limits.storage import MemoryStorage, Storage, storage_from_string
+from limits.storage import MemoryStorage, storage_from_string
 from limits.strategies import MovingWindowRateLimiter
 
 from app.config import Settings
@@ -25,7 +27,7 @@ TICKET_LIMIT = "30/minute"  # per user
 class RateLimiter:
     def __init__(self) -> None:
         self.enabled = True
-        self._storage: Storage = MemoryStorage()
+        self._storage: Any = MemoryStorage()
         self._strategy = MovingWindowRateLimiter(self._storage)
 
     def configure(self, settings: Settings) -> None:

@@ -94,7 +94,9 @@ async def list_users(
 
 @router.get("/by-username/{username}", response_model=UserOut)
 async def get_user_by_username(
-    username: Annotated[str, Path(min_length=1, max_length=50)], caller: ServiceOrAdmin, session: Session
+    username: Annotated[str, Path(min_length=1, max_length=50)],
+    caller: ServiceOrAdmin,
+    session: Session,
 ):
     """For the bot's /link flow: verify that a username exists. Admin or service account only."""
     user = await UserRepository(session).get_by_username(username)

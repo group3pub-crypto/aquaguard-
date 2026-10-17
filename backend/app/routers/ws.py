@@ -87,8 +87,9 @@ async def live(
 
     client = rt.ws.add(ws, uid, scope, [_valid_uuid(flat_id) or "", _valid_uuid(society_id) or ""])
     loop = asyncio.get_running_loop()
-    last_rx = next_ping = loop.time()
-    next_check = loop.time() + s.ws_revalidate_s
+    last_rx = loop.time()
+    next_ping = last_rx + s.ws_ping_interval_s
+    next_check = last_rx + s.ws_revalidate_s
     try:
         while True:
             now = loop.time()

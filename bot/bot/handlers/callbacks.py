@@ -6,6 +6,7 @@ from typing import Any
 
 from bot.deps import Deps, explain, get_deps
 
+_NLU_TOOLS = {"acknowledge_alert", "snooze_alert", "resolve_alert"}
 _ALERT_TOOLS = {"ack": "acknowledge_alert", "snooze": "snooze_alert", "resolve": "resolve_alert"}
 
 
@@ -40,6 +41,18 @@ async def dispatch(
                 text = await deps.registry.call("set_valve", payload, principal, deps.api)
                 deps.audit.record("valve", principal.actor if principal else f"telegram:{uid}", **payload)
                 return text
+        elif kind == "nlu" and len(parts) == 3:
+            payload = deps.confirm.consume(parts[2], uid, chat_id if chat_id is not None else 0, message_id)
+            if payload is None:
+                return "This confirmation is no longer valid."
+            if parts[1] == "no":
+                return "Cancelled."
+            tool, args = payload.get("tool"), payload.get("args")
+            if parts[1] != "yes" or tool not in _NLU_TOOLS or not isinstance(args, dict):
+                return "Unknown action."
+            text = await deps.registry.call(tool, args, principal, deps.api)  # role re-checked here
+            deps.audit.record("nlu_confirmed", principal.actor if principal else f"telegram:{uid}", tool=tool, **args)
+            return text
         elif kind == "alert" and len(parts) == 3 and parts[1] in _ALERT_TOOLS:
             args = {"alert_id": parts[2]}
             if parts[1] == "snooze":

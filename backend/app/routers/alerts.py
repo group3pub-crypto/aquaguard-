@@ -90,7 +90,14 @@ async def snooze(
     scope: CallerScope,
 ):
     return await _act(
-        session, rt, scope, user, alert_id, "snooze", body.on_behalf_of, minutes=body.duration_minutes
+        session,
+        rt,
+        scope,
+        user,
+        alert_id,
+        "snooze",
+        body.on_behalf_of,
+        minutes=body.duration_minutes,
     )
 
 

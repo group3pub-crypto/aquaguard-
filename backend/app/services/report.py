@@ -57,7 +57,11 @@ async def top_losses(
         totals[a.flat_id] = totals.get(a.flat_id, 0.0) + (a.est_loss_lpm or 0.0) * minutes
     ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
     units = dict(
-        (await session.execute(select(Flat.id, Flat.unit_number).where(Flat.id.in_([f for f, _ in ranked]))))
+        (
+            await session.execute(
+                select(Flat.id, Flat.unit_number).where(Flat.id.in_([f for f, _ in ranked]))
+            )
+        )
         .tuples()
         .all()
     )

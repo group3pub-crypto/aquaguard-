@@ -96,7 +96,7 @@ async def get_flat(flat_id: uuid.UUID, session: Session, scope: CallerScope):
         current_flow=latest.flow_rate if latest else None,
         last_reading_at=latest.timestamp if latest else None,
         sensor_status=SensorStatus(
-            status=sensor_status(last_seen, datetime.now(UTC)),  # type: ignore[arg-type]
+            status=sensor_status(last_seen, datetime.now(UTC)),
             last_seen=last_seen,
             missed_readings=health.missed_readings if health else 0,
         ),
@@ -185,7 +185,9 @@ async def get_baseline(flat_id: uuid.UUID, session: Session, scope: CallerScope)
 
 
 @router.post("/{flat_id}/baseline/retrain", response_model=BaselineOut)
-async def retrain_baseline(flat_id: uuid.UUID, admin: AdminUser, session: Session, scope: CallerScope):
+async def retrain_baseline(
+    flat_id: uuid.UUID, admin: AdminUser, session: Session, scope: CallerScope
+):
     flat = await flat_in_scope(session, scope, flat_id)
     return await baseline_svc.train_baseline(session, flat, actor=admin.username)
 

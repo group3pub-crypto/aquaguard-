@@ -109,9 +109,10 @@ async def test_dead_letter_queue_is_bounded(rt, world):
     assert len(rt.dead_letters) == rt.settings.dead_letter_size
 
 
-async def test_health_endpoint_exposes_dead_letters_without_payloads(client, rt, world):
+async def test_health_details_exposes_dead_letters_without_payloads(client, rt, world):
     await ingest.handle_message(rt, TOPIC, b'{"secret": "payload"}')
-    body = (await client.get("/health")).json()
+    assert (await client.get("/health")).json() == {"status": "ok"}  # public: nothing else
+    body = (await client.get("/health/details", headers=world.admin)).json()
     assert body["db"] == "ok" and body["dead_letters"]["count"] == 1
     assert "secret" not in json.dumps(body)
     assert body["ingest"]["flow_failed"] == 1

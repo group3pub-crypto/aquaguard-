@@ -31,7 +31,7 @@ async def test_open_valve_and_status(client, world, publisher):
     assert (
         await client.post(f"{API}/valves/{fid}/open", json={}, headers=world.admin)
     ).status_code == 200
-    st = (await client.get(f"{API}/valves/{fid}", headers=world.resident)).json()
+    st = (await client.get(f"{API}/valves/{fid}", headers=world.maintenance)).json()
     assert (
         st["valve_state"] == "unknown"
         and len(st["pending"]) == 1

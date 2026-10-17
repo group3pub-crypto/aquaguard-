@@ -73,7 +73,9 @@ class AlertRepository(BaseRepository[Alert]):
         if flat_ids is not None:
             stmt = stmt.where(Alert.flat_id.in_(flat_ids))
         if society_id is not None:
-            stmt = stmt.where(Alert.flat_id.in_(select(Flat.id).where(Flat.society_id == society_id)))
+            stmt = stmt.where(
+                Alert.flat_id.in_(select(Flat.id).where(Flat.society_id == society_id))
+            )
         if scope is not None:
             stmt = stmt.where(scope.flat_id_pred(Alert.flat_id))
         if limit is not None:
