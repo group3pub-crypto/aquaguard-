@@ -3,33 +3,39 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 
-from app.dependencies import RT, AdminUser, Session, require_user
-from app.repositories import FlatRepository, ValveRepository
-from app.schemas.domain import ValveCommandOut, ValveRequest, ValveStatus
+from app.access import flat_in_scope
+from app.actor import resolve_actor
+from app.dependencies import RT, AdminUser, CallerScope, Session
+from app.repositories import ValveRepository
+from app.schemas.domain import ValveCommandActionOut, ValveCommandOut, ValveRequest, ValveStatus
 from app.services import valve_control
 
 router = APIRouter(prefix="/valves", tags=["valves"])
 
 
-async def _flat(session, flat_id: uuid.UUID):
-    flat = await FlatRepository(session).get(flat_id)
-    if flat is None:
-        raise HTTPException(404, "Flat not found")
-    return flat
-
-
-async def _command(session, rt, flat_id, command: Literal["open", "close"], body, admin):
-    flat = await _flat(session, flat_id)
-    return await valve_control.send_valve_command(
-        session, rt, flat, command, source=body.source, issued_by=admin.username, reason=body.reason
+async def _command(
+    session, rt, scope, flat_id, command: Literal["open", "close"], body: ValveRequest, admin
+) -> ValveCommandActionOut:
+    actor = resolve_actor(admin, body.on_behalf_of)
+    flat = await flat_in_scope(session, scope, flat_id)
+    cmd = await valve_control.send_valve_command(
+        session,
+        rt,
+        flat,
+        command,
+        source=body.source,
+        issued_by=actor.username,  # never body.issued_by
+        reason=body.reason,
+        details=actor.audit_details(),
     )
+    return ValveCommandActionOut.model_validate(cmd).model_copy(update=actor.echo())
 
 
-@router.get("/{flat_id}", response_model=ValveStatus, dependencies=[Depends(require_user)])
-async def valve_status(flat_id: uuid.UUID, session: Session):
-    flat = await _flat(session, flat_id)
+@router.get("/{flat_id}", response_model=ValveStatus)
+async def valve_status(flat_id: uuid.UUID, session: Session, scope: CallerScope):
+    flat = await flat_in_scope(session, scope, flat_id)
     repo = ValveRepository(session)
     return ValveStatus(
         flat_id=flat.id,
@@ -39,15 +45,25 @@ async def valve_status(flat_id: uuid.UUID, session: Session):
     )
 
 
-@router.post("/{flat_id}/open", response_model=ValveCommandOut)
+@router.post("/{flat_id}/open", response_model=ValveCommandActionOut)
 async def open_valve(
-    flat_id: uuid.UUID, body: ValveRequest, admin: AdminUser, session: Session, rt: RT
+    flat_id: uuid.UUID,
+    body: ValveRequest,
+    admin: AdminUser,
+    session: Session,
+    rt: RT,
+    scope: CallerScope,
 ):
-    return await _command(session, rt, flat_id, "open", body, admin)
+    return await _command(session, rt, scope, flat_id, "open", body, admin)
 
 
-@router.post("/{flat_id}/close", response_model=ValveCommandOut)
+@router.post("/{flat_id}/close", response_model=ValveCommandActionOut)
 async def close_valve(
-    flat_id: uuid.UUID, body: ValveRequest, admin: AdminUser, session: Session, rt: RT
+    flat_id: uuid.UUID,
+    body: ValveRequest,
+    admin: AdminUser,
+    session: Session,
+    rt: RT,
+    scope: CallerScope,
 ):
-    return await _command(session, rt, flat_id, "close", body, admin)
+    return await _command(session, rt, scope, flat_id, "close", body, admin)

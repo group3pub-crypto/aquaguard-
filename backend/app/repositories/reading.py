@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from app.models import FlowReading
+from app.models import Flat, FlowReading
 from app.repositories.base import BaseRepository
 
 
@@ -127,3 +127,19 @@ class ReadingRepository(BaseRepository[FlowReading]):
             .order_by(FlowReading.timestamp)
         )
         return [(t, f, v) for t, f, v in (await self.session.execute(stmt)).all()]
+
+    async def volume_sum_society(
+        self, society_id: uuid.UUID, start: datetime, end: datetime
+    ) -> float:
+        """Total litres for a whole society in one aggregate query."""
+        stmt = (
+            select(func.coalesce(func.sum(FlowReading.volume), 0.0))
+            .select_from(FlowReading)
+            .join(Flat, Flat.id == FlowReading.flat_id)
+            .where(
+                Flat.society_id == society_id,
+                FlowReading.timestamp >= start,
+                FlowReading.timestamp <= end,
+            )
+        )
+        return float((await self.session.execute(stmt)).scalar_one())

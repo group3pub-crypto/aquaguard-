@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
-from app.models import ValveCommand
+from app.models import Flat, ValveCommand
 from app.repositories.base import BaseRepository
 from app.scope import Scope
 
@@ -80,4 +80,22 @@ class ValveRepository(BaseRepository[ValveCommand]):
                 ValveCommand.issued_at >= start,
                 ValveCommand.issued_at <= end,
             )
+        )
+
+    async def count_between_society(
+        self, society_id: uuid.UUID, start: datetime, end: datetime
+    ) -> int:
+        return int(
+            (
+                await self.session.execute(
+                    select(func.count())
+                    .select_from(ValveCommand)
+                    .join(Flat, Flat.id == ValveCommand.flat_id)
+                    .where(
+                        Flat.society_id == society_id,
+                        ValveCommand.issued_at >= start,
+                        ValveCommand.issued_at <= end,
+                    )
+                )
+            ).scalar_one()
         )

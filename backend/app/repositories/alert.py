@@ -58,7 +58,12 @@ class AlertRepository(BaseRepository[Alert]):
         return await self._one(stmt)
 
     async def active(
-        self, flat_ids: list[uuid.UUID] | None = None, *, scope: Scope | None = None, limit=None
+        self,
+        flat_ids: list[uuid.UUID] | None = None,
+        *,
+        scope: Scope | None = None,
+        society_id: uuid.UUID | None = None,
+        limit: int | None = None,
     ) -> list[Alert]:
         stmt = (
             select(Alert)
@@ -67,6 +72,8 @@ class AlertRepository(BaseRepository[Alert]):
         )
         if flat_ids is not None:
             stmt = stmt.where(Alert.flat_id.in_(flat_ids))
+        if society_id is not None:
+            stmt = stmt.where(Alert.flat_id.in_(select(Flat.id).where(Flat.society_id == society_id)))
         if scope is not None:
             stmt = stmt.where(scope.flat_id_pred(Alert.flat_id))
         if limit is not None:
@@ -178,4 +185,22 @@ class AlertRepository(BaseRepository[Alert]):
             select(Alert.id).where(
                 Alert.flat_id.in_(flat_ids), Alert.created_at >= start, Alert.created_at <= end
             )
+        )
+
+    async def count_between_society(
+        self, society_id: uuid.UUID, start: datetime, end: datetime
+    ) -> int:
+        return int(
+            (
+                await self.session.execute(
+                    select(func.count())
+                    .select_from(Alert)
+                    .join(Flat, Flat.id == Alert.flat_id)
+                    .where(
+                        Flat.society_id == society_id,
+                        Alert.created_at >= start,
+                        Alert.created_at <= end,
+                    )
+                )
+            ).scalar_one()
         )

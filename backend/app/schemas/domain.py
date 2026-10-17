@@ -117,35 +117,73 @@ class AlertOut(ORM):
     acknowledged_by: str | None = None
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
+    shutoff_warned_at: datetime | None = None
+    shutoff_gave_up_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
+class AssertedActor(BaseModel):
+    """Echo of an `on_behalf_of` assertion by a SERVICE account: recorded, never verified."""
+
+    on_behalf_of: str | None = Field(
+        None, description="Asserted by a service account; NOT verified by the backend"
+    )
+    on_behalf_of_verified: bool | None = Field(
+        None, description="Always false when on_behalf_of is set"
+    )
+
+
+class AlertActionOut(AlertOut, AssertedActor):
+    pass
+
+
+OnBehalfOf = Field(
+    None,
+    max_length=100,
+    description="Service accounts only: end user the action is performed for. Recorded in the "
+    "audit trail as asserted, not verified. Other callers get 422.",
+)
+
+
 class AcknowledgeRequest(BaseModel):
+    on_behalf_of: str | None = OnBehalfOf
     acknowledged_by: str | None = Field(
-        None, max_length=100, description="Ignored; actor is the caller"
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
     )
 
 
 class SnoozeRequest(BaseModel):
     duration_minutes: Literal[15, 30, 60, 120]
-    snoozed_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    snoozed_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class OverrideRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
-    overridden_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    overridden_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ResolveRequest(BaseModel):
-    resolved_by: str | None = Field(None, max_length=100)
+    on_behalf_of: str | None = OnBehalfOf
+    resolved_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ValveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal["manual_dashboard", "manual_bot", "manual_override"] = "manual_dashboard"
-    issued_by: str | None = Field(None, max_length=100)
     reason: str | None = Field(None, max_length=500)
+    on_behalf_of: str | None = OnBehalfOf
+    issued_by: str | None = Field(
+        None, max_length=100, deprecated=True, description="Ignored; the actor is the caller"
+    )
 
 
 class ValveCommandOut(ORM):
@@ -165,3 +203,7 @@ class ValveStatus(BaseModel):
     valve_state: str
     pending: list[ValveCommandOut]
     recent: list[ValveCommandOut]
+
+
+class ValveCommandActionOut(ValveCommandOut, AssertedActor):
+    pass
